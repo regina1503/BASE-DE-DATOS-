@@ -549,7 +549,39 @@
         {key:'requestedBy',label:'¿Quién gira la orden?',type:'text',required:true,placeholder:'Ing. Paola Serrano'},
         {key:'client',label:'Cliente',type:'text',required:true,placeholder:'Desarrolladora Cumbres'},
         {key:'project',label:'Obra / proyecto',type:'text',placeholder:'Torre Norte, Etapa 2'},
-        {key:'serviceType',label:'Tipo de servicio',type:'select',options:['Sondeo de penetración estándar (SPT)','Pozo a cielo abierto','Muestreo inalterado','Ensayos de laboratorio','Estudio de mecánica de suelos completo','Otro'],default:'Estudio de mecánica de suelos completo'},
+        {key:'serviceType',label:'Tipo de servicio',type:'select',options:[
+          'Compactación en campo',
+          'Mecánica de suelos - privado',
+          'Mecánica de suelos - 3 sondeos',
+          'Sondeo adicional',
+          'Profundidad adicional PCA/SPT',
+          'Perforación',
+          'DCP',
+          'Diseño de pavimento',
+          'Capa de transición / terraplén',
+          'Capa subyacente',
+          'Capa subrasante',
+          'Revestimiento',
+          'Grava para base mejorada',
+          'Subbase / base hidráulica',
+          'Recuperación en frío - base mejorada',
+          'Material pétreo para mezcla asfáltica',
+          'Mezcla asfáltica en caliente',
+          'Mezcla asfáltica en frío',
+          'Sello premezclado',
+          'Concreto - compresión',
+          'Probeta adicional de concreto',
+          'Concreto - flexión',
+          'SUCS independiente',
+          'Núcleos / corazones',
+          'Block / adoquín / tabique',
+          'Visita técnica / asesoría',
+          'Banco de materiales',
+          'Diseño de mezclas',
+          'Acero de refuerzo',
+          'Placa de carga / módulo K',
+          'Otro'
+        ],default:'Mecánica de suelos - privado'},
         {key:'assignedTo',label:'¿Quién la hará?',type:'text',placeholder:'Ing. Rodrigo Paz'},
         {key:'priority',label:'Prioridad',type:'select',options:['Alta','Media','Baja'],default:'Media'},
         {key:'notes',label:'Notas',type:'textarea',placeholder:'Número de sondeos, profundidad, ensayos requeridos…'}
@@ -575,6 +607,7 @@
     {key:'laboratorio',  label:'Recibida en laboratorio', verb:'la recibe en el laboratorio',    color:'var(--accent)',    pill:'pill-progreso'},
     {key:'analisis',     label:'En análisis',             verb:'realiza el análisis',            color:'var(--warn)',      pill:'pill-pendiente'},
     {key:'lista',        label:'Lista / resultados',      verb:'confirma que está lista',        color:'var(--good)',      pill:'pill-hecho'},
+    {key:'gabinete',     label:'Gabinete',                verb:'la pasa a gabinete',              color:'var(--warn)',      pill:'pill-pendiente'},
     {key:'entregada',    label:'Entregada al cliente',    verb:'la entrega al cliente',          color:'var(--good)',      pill:'pill-hecho'}
   ];
   function stageInfo(key){ return ORDER_STAGES.find(s=>s.key===key) || ORDER_STAGES[0]; }
@@ -614,7 +647,11 @@
   /* Contraseña de fábrica del panel interno — cámbiala desde la pestaña
      Accesos en cuanto entres la primera vez. */
   const DEFAULT_PASSWORD = 'suelos2024';
-  const DEFAULT_NAMES = ['Ing. Paola Serrano','Luis Fernández','Karla Núñez','Ing. Rodrigo Paz','Ana Belén Ríos'];
+  /* Personas del organigrama que SÍ pueden usar "¿Quién eres?" para
+     filtrar sus pendientes — es decir, todo el equipo menos dirección
+     general y las dos jefaturas (Iván, Regina y Claudia), que en vez de
+     eso entran directo al Panel interno. */
+  const DEFAULT_NAMES = ['Alejandro Ibarra Torres','Fernando Cervantes Vázquez','Luis David Silva Gómez','Daniel Arcibar Padrón'];
   /* Únicas personas que pueden entrar al Panel interno (precios, cobros,
      sueldos, accesos, etc.). Todos los demás solo ven la pestaña Órdenes,
      sin importar que sepan la contraseña. Según el organigrama: dirección
@@ -1400,7 +1437,7 @@
     const nextAppt = upcomingAppts[0];
     const upcomingPayroll = [...state.employees].sort((a,b)=>(a.payday||'9999').localeCompare(b.payday||'9999'))[0];
     const activeOrders = state.orders.filter(o=>o.currentStage!=='entregada');
-    const readyOrders = state.orders.filter(o=>o.currentStage==='lista');
+    const readyOrders = state.orders.filter(o=>o.currentStage==='gabinete');
 
     const tiles = [
       {label:'Órdenes activas', value:activeOrders.length, foot: readyOrders.length? readyOrders.length+' lista(s) para entregar' : (state.orders.length? 'en proceso':'sin órdenes'), cls: readyOrders.length?'warn':''},
@@ -1413,7 +1450,7 @@
 
     const attn = [];
     readyOrders.forEach(o=>attn.push({swatch:'accent',tag:'Orden',title:o.folio+' · '+o.client,meta:'lista para entregar'}));
-    activeOrders.filter(o=>o.currentStage!=='lista').forEach(o=>{
+    activeOrders.filter(o=>o.currentStage!=='gabinete').forEach(o=>{
       const last = (o.events||[]).slice(-1)[0];
       if(last){
         const d = daysSinceISO(last.at);
@@ -1512,6 +1549,7 @@
             <td>${r.due? (overdue?`<span class="pill pill-vencido">${fmtDateShort(r.due)}</span>`:fmtDate(r.due)):'—'}</td>
             <td><span class="pill ${statusClass(r.status)}">${esc(r.status||'—')}</span></td>
             <td class="row-actions">
+              ${r.status!=='Pagado'?`<button class="btn btn-sm btn-ghost" data-act="addadvance" data-col="receivables">+ Anticipo</button>`:''}
               ${r.status!=='Pagado'?`<button class="btn btn-sm btn-ghost" data-act="markpaid" data-col="receivables">Marcar pagado</button>`:''}
               <button class="btn btn-sm btn-ghost" data-act="edit" data-col="receivables">Editar</button>
               <button class="btn btn-sm btn-danger-text" data-act="delete" data-col="receivables">Eliminar</button>
@@ -1679,7 +1717,22 @@
           const next = order[Math.min(order.indexOf(doc.status)+1, order.length-1)];
           await patchDoc(col,id,{status:next});
         }
-        else if(act==='markpaid') await patchDoc(col,id,{status:'Pagado'});
+        else if(act==='addadvance'){
+          const costo = Number(doc.amount)||0;
+          const currentAdvance = Number(doc.advance)||0;
+          const input = prompt('¿Cuánto te dieron de anticipo? (se suma al anticipo ya registrado: '+money(currentAdvance)+')', '');
+          if(input===null) return;
+          const add = Number(input);
+          if(!add || add<=0) return;
+          const newAdvance = costo>0 ? Math.min(currentAdvance+add, costo) : currentAdvance+add;
+          const patch = {advance:newAdvance};
+          if(costo>0 && newAdvance>=costo) patch.status = 'Pagado';
+          await patchDoc(col,id,patch);
+        }
+        else if(act==='markpaid'){
+          const costo = Number(doc.amount)||0;
+          await patchDoc(col,id,{status:'Pagado', advance:costo});
+        }
         else if(act==='deliver') await patchDoc(col,id,{status:'Entregado'});
         else if(act==='paynow'){
           const freqDays = {Semanal:7,Quincenal:15,Mensual:30};
@@ -1700,6 +1753,7 @@
     {label:'Aceptada',             color: stageInfo('aceptada').color,     stages:['aceptada']},
     {label:'Trabajo de campo',     color: stageInfo('campo').color,        stages:['campo']},
     {label:'Laboratorio',          color: stageInfo('laboratorio').color,  stages:['laboratorio','analisis','lista']},
+    {label:'Gabinete',             color: stageInfo('gabinete').color,     stages:['gabinete']},
     {label:'Entregada al cliente', color: stageInfo('entregada').color,    stages:['entregada']}
   ];
   function isMine(o){
@@ -1833,6 +1887,7 @@
         ? `<button class="btn btn-accent" id="advanceOrderBtn" style="width:100%;justify-content:center;margin-top:14px">Registrar: ${next.label}</button>`
         : `<div class="empty-state" style="padding:14px 0 0"><p>Ciclo completo — orden entregada al cliente.</p></div>`
       }
+      ${renderOrderSamples(o)}
       ${isAdmin ? renderOrderFinance(o) : ''}
       <div class="modal-actions" style="margin-top:14px">
         <button class="btn btn-ghost" id="editOrderBasicBtn">Editar datos</button>
@@ -1844,6 +1899,7 @@
     document.getElementById('deleteOrderBtn').onclick = async ()=>{
       if(confirm('¿Eliminar esta orden y todo su historial?')){ await deleteDoc('orders', o.id); closeOrderModal(); }
     };
+    bindOrderSamples(o);
     if(isAdmin){
       const financeForm = document.getElementById('orderFinanceForm');
       if(financeForm) financeForm.addEventListener('submit', async (e)=>{
@@ -1854,6 +1910,88 @@
         renderOrderDetail({...o, costo, anticipo});
       });
     }
+  }
+
+  /* ============ MUESTRAS (recolección + pruebas de 7/14/28 días) ============
+     Pensado sobre todo para órdenes de concreto (compresión/flexión), pero
+     sirve para cualquier orden que maneje varias muestras. Visible para
+     todo el que vea el detalle de la orden (campo y laboratorio incluidos),
+     no solo el panel interno — es seguimiento de trabajo, no dinero. */
+  function renderOrderSamples(o){
+    const samples = o.samples || [];
+    return `
+      <div class="order-meta" style="border-top:1px solid var(--border);border-bottom:none;padding-top:14px;margin-top:14px;">
+        <div class="row-title" style="font-size:13.5px;margin-bottom:8px;">🧪 Muestras (${samples.length})</div>
+        ${samples.length ? samples.map((s,i)=>`
+          <div class="attn-row" style="align-items:flex-start;flex-wrap:wrap;gap:10px;">
+            <div style="flex:1;min-width:160px;">
+              <div class="row-title" style="font-size:13px;">Muestra ${i+1}</div>
+              <div class="row-sub">${s.collected
+                ? '✅ Muestra recolectada'+(s.collectedAt?' · '+fmtDateTime(s.collectedAt):'')
+                : '⏳ Muestra por recolectar'}</div>
+              ${s.collected ? `
+                <div class="row-sub" style="margin-top:6px;display:flex;gap:12px;flex-wrap:wrap;">
+                  <label style="display:flex;align-items:center;gap:5px;cursor:pointer;">
+                    <input type="checkbox" data-sample-test="t7" data-sample-id="${s.id}" ${s.t7?'checked':''}>
+                    Prueba 7 días${s.t7&&s.t7At?` (${fmtDateTime(s.t7At)})`:''}
+                  </label>
+                  <label style="display:flex;align-items:center;gap:5px;cursor:pointer;">
+                    <input type="checkbox" data-sample-test="t14" data-sample-id="${s.id}" ${s.t14?'checked':''}>
+                    Prueba 14 días${s.t14&&s.t14At?` (${fmtDateTime(s.t14At)})`:''}
+                  </label>
+                  <label style="display:flex;align-items:center;gap:5px;cursor:pointer;">
+                    <input type="checkbox" data-sample-test="t28" data-sample-id="${s.id}" ${s.t28?'checked':''}>
+                    Prueba 28 días${s.t28&&s.t28At?` (${fmtDateTime(s.t28At)})`:''}
+                  </label>
+                </div>` : ''}
+            </div>
+            <div style="display:flex;gap:6px;flex-wrap:wrap;">
+              <button class="btn btn-sm btn-ghost" data-sample-toggle="${s.id}">${s.collected?'Marcar pendiente':'Marcar recolectada'}</button>
+              <button class="btn btn-sm btn-danger-text" data-sample-remove="${s.id}">Quitar</button>
+            </div>
+          </div>
+        `).join('') : `<div class="row-sub" style="padding-bottom:6px;">Aún no registras muestras para esta orden.</div>`}
+        <button class="btn btn-ghost btn-sm" id="addSampleBtn" style="margin-top:8px;">+ Agregar muestra</button>
+      </div>`;
+  }
+  function bindOrderSamples(o){
+    const addBtn = document.getElementById('addSampleBtn');
+    if(addBtn) addBtn.onclick = async ()=>{
+      const samples = [...(o.samples||[]), {id:cryptoId(), collected:false, collectedAt:null, t7:false,t7At:null, t14:false,t14At:null, t28:false,t28At:null}];
+      await patchDoc('orders', o.id, {samples});
+      renderOrderDetail({...o, samples});
+    };
+    document.querySelectorAll('[data-sample-toggle]').forEach(btn=>{
+      btn.addEventListener('click', async ()=>{
+        const id = btn.dataset.sampleToggle;
+        const samples = (o.samples||[]).map(s=> s.id===id
+          ? {...s, collected: !s.collected, collectedAt: !s.collected ? new Date().toISOString() : s.collectedAt}
+          : s);
+        await patchDoc('orders', o.id, {samples});
+        renderOrderDetail({...o, samples});
+      });
+    });
+    document.querySelectorAll('[data-sample-remove]').forEach(btn=>{
+      btn.addEventListener('click', async ()=>{
+        const id = btn.dataset.sampleRemove;
+        if(!confirm('¿Quitar esta muestra de la orden?')) return;
+        const samples = (o.samples||[]).filter(s=>s.id!==id);
+        await patchDoc('orders', o.id, {samples});
+        renderOrderDetail({...o, samples});
+      });
+    });
+    document.querySelectorAll('[data-sample-test]').forEach(chk=>{
+      chk.addEventListener('change', async ()=>{
+        const id = chk.dataset.sampleId;
+        const key = chk.dataset.sampleTest; // 't7' | 't14' | 't28'
+        const atKey = key+'At';
+        const samples = (o.samples||[]).map(s=> s.id===id
+          ? {...s, [key]: chk.checked, [atKey]: chk.checked ? new Date().toISOString() : null}
+          : s);
+        await patchDoc('orders', o.id, {samples});
+        renderOrderDetail({...o, samples});
+      });
+    });
   }
   function renderOrderFinance(o){
     const costo = Number(o.costo)||0;
