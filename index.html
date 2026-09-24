@@ -457,7 +457,8 @@
     orders: '<svg viewBox="0 0 24 24"><rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4V3a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v1"/><path d="M8.5 11h3M8.5 15h3"/><path d="m13.5 10.5 1.8 1.8L19 8.5"/></svg>',
     access: '<svg viewBox="0 0 24 24"><path d="M2.5 12S6 5.7 12 5.7 21.5 12 21.5 12 18 18.3 12 18.3 2.5 12 2.5 12Z"/><circle cx="12" cy="12" r="3"/></svg>',
     lock: '<svg viewBox="0 0 24 24"><rect x="5" y="10.5" width="14" height="9" rx="2.2"/><path d="M8 10.5V8a4 4 0 0 1 8 0v2.5"/></svg>',
-    clients: '<svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 19c0-3.3 2.5-5.5 5.5-5.5s5.5 2.2 5.5 5.5"/><circle cx="17" cy="8.5" r="2.4"/><path d="M15.8 13.6c2.3.3 4 2.2 4 5.4"/></svg>'
+    clients: '<svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 19c0-3.3 2.5-5.5 5.5-5.5s5.5 2.2 5.5 5.5"/><circle cx="17" cy="8.5" r="2.4"/><path d="M15.8 13.6c2.3.3 4 2.2 4 5.4"/></svg>',
+    pricetag: '<svg viewBox="0 0 24 24"><path d="M11.5 4H5a1 1 0 0 0-1 1v6.5a1 1 0 0 0 .3.7l9 9a1 1 0 0 0 1.4 0l6.5-6.5a1 1 0 0 0 0-1.4l-9-9a1 1 0 0 0-.7-.3Z"/><circle cx="8.5" cy="8.5" r="1.4"/></svg>'
   };
 
   /* ============ SCHEMAS ============ */
@@ -470,6 +471,7 @@
     {key:'employees',  label:'Sueldos',  icon:'payroll'},
     {key:'deliveries', label:'Entregas', icon:'truck'},
     {key:'appointments',label:'Citas',   icon:'calendar'},
+    {key:'priceList',  label:'Precios',  icon:'pricetag'},
     {key:'access',     label:'Accesos',  icon:'access'}
   ];
   /* Tabs visibles para cualquiera con el enlace (org). Todo lo demás sólo
@@ -552,6 +554,14 @@
         {key:'priority',label:'Prioridad',type:'select',options:['Alta','Media','Baja'],default:'Media'},
         {key:'notes',label:'Notas',type:'textarea',placeholder:'Número de sondeos, profundidad, ensayos requeridos…'}
       ]
+    },
+    priceList:{
+      title:'Servicio', titlePlural:'servicios',
+      fields:[
+        {key:'service',label:'Servicio',type:'text',required:true,placeholder:'Mecánica de suelos - privado'},
+        {key:'price',label:'Precio',type:'text',required:true,placeholder:'$13,000'},
+        {key:'frequency',label:'Frecuencia / mínimo',type:'textarea',placeholder:'1 sondeo / 80 m de perímetro. Mínimo 2 sondeos de 3 m.'}
+      ]
     }
   };
 
@@ -605,6 +615,11 @@
      Accesos en cuanto entres la primera vez. */
   const DEFAULT_PASSWORD = 'suelos2024';
   const DEFAULT_NAMES = ['Ing. Paola Serrano','Luis Fernández','Karla Núñez','Ing. Rodrigo Paz','Ana Belén Ríos'];
+  /* Únicas personas que pueden entrar al Panel interno (precios, cobros,
+     sueldos, accesos, etc.). Todos los demás solo ven la pestaña Órdenes,
+     sin importar que sepan la contraseña. Según el organigrama: dirección
+     general y las dos jefaturas que dependen directo de ella. */
+  const ADMIN_NAMES = ['Iván Torres Sierra','Regina Contreras Ruiz','Claudia Torres Sierra'];
 
   function readJSON(key, fallback){
     try{ const raw = localStorage.getItem(key); return raw ? JSON.parse(raw) : fallback; }
@@ -643,7 +658,7 @@
 
   let db = null;
   let currentTab = 'dashboard';
-  let state = cachedState || {tasks:[],receivables:[],employees:[],deliveries:[],appointments:[],orders:[],clients:[]};
+  let state = cachedState || {tasks:[],receivables:[],employees:[],deliveries:[],appointments:[],orders:[],clients:[],priceList:[]};
   /* Compatibilidad: quien ya tenía una copia local guardada antes de que
      existiera "clientes" (u otra colección nueva) no debe romperse. */
   COLLECTIONS.forEach(c=>{ if(!Array.isArray(state[c])) state[c] = []; });
@@ -708,9 +723,49 @@
     return 'hace '+(-n)+' días';
   }
 
+  /* ============ LISTA DE PRECIOS REAL (no es dato de ejemplo) ============
+     Tu tabla de precios y frecuencias de muestreo, tal cual. Vive en la
+     colección "priceList", visible solo dentro del Panel interno. Se siembra
+     una sola vez, la primera vez que esa colección aparece vacía — editarla
+     o borrarla después es normal y no se vuelve a rellenar sola. */
+  const REAL_PRICE_LIST = [
+    {service:'Compactación en campo', price:'$900 / sondeo', frequency:'1 cada 50 m. Mínimo 2 sondeos.'},
+    {service:'Mecánica de suelos - privado', price:'$13,000', frequency:'1 sondeo / 80 m de perímetro. Mínimo 2 sondeos de 3 m.'},
+    {service:'Mecánica de suelos - 3 sondeos', price:'$18,000', frequency:'3 sondeos de 3 m. Mínimo gubernamental.'},
+    {service:'Sondeo adicional', price:'$5,000', frequency:'Por sondeo adicional de 3 m.'},
+    {service:'Profundidad adicional PCA/SPT', price:'$2,000 / m', frequency:'Según profundidad requerida.'},
+    {service:'Perforación', price:'$2,800 / m', frequency:'Mismas condicionantes de Mecánica de Suelos.'},
+    {service:'DCP', price:'$900 / m', frequency:'Solo complemento de PCA/SPT. De 1 a 10 m.'},
+    {service:'Diseño de pavimento', price:'$6,300 / sondeo', frequency:'1 PCA / 50 m de vialidad. Mínimo 2. Profundidad 1 m.'},
+    {service:'Capa de transición / terraplén', price:'$1,800 / muestra', frequency:'1 muestra / 1,000 m³.'},
+    {service:'Capa subyacente', price:'$1,800 / muestra', frequency:'1 muestra / 800 m³.'},
+    {service:'Capa subrasante', price:'$1,800 / muestra', frequency:'1 muestra / 500 m³.'},
+    {service:'Revestimiento', price:'$1,800 / muestra', frequency:'1 muestra / 500 m³.'},
+    {service:'Grava para base mejorada', price:'$2,700 / muestra', frequency:'1 muestra / 400 m³.'},
+    {service:'Subbase / base hidráulica', price:'$2,700 / muestra', frequency:'1 muestra / 400 m³.'},
+    {service:'Recuperación en frío - base mejorada', price:'$2,700 / muestra', frequency:'1 muestra / 400 m³.'},
+    {service:'Material pétreo para mezcla asfáltica', price:'$2,700 / muestra', frequency:'1 muestra / 250 m³.'},
+    {service:'Mezcla asfáltica en caliente', price:'$2,700 / muestra', frequency:'1 muestra / 150 m³.'},
+    {service:'Mezcla asfáltica en frío', price:'$2,700 / muestra', frequency:'1 muestra / 50 m³.'},
+    {service:'Sello premezclado', price:'$2,700 / muestra', frequency:'1 muestra / 100 m³.'},
+    {service:'Concreto - compresión', price:'1a: $1,800 / 2a y sig.: $1,350', frequency:'1 muestra / 21 m³. Cada muestra: 4 cilindros. Adicionales a $1,350 si son en la misma visita.'},
+    {service:'Probeta adicional de concreto', price:'$450 / cilindro', frequency:'Probeta adicional de la misma muestra.'},
+    {service:'Concreto - flexión', price:'1a: $2,250 / 2a y sig.: $1,700', frequency:'1 muestra / 42 m³. Cada muestra: 4 vigas. Adicionales a $1,700 si son en la misma visita.'},
+    {service:'SUCS independiente', price:'$900 / muestra', frequency:'Según muestra solicitada. Incluido sin cargo adicional en Mecánica de Suelos.'},
+    {service:'Núcleos / corazones', price:'$180 / cm', frequency:'Mínimo 4 cm = $720 por núcleo.'},
+    {service:'Block / adoquín / tabique', price:'$600 / pieza', frequency:'—'},
+    {service:'Visita técnica / asesoría', price:'$1,800 / hora', frequency:'Según solicitud. Seguimiento de servicio contratado: postventa sin costo.'},
+    {service:'Banco de materiales', price:'Según material', frequency:'Aplicar precio y frecuencia correspondientes al material.'},
+    {service:'Diseño de mezclas', price:'ESPECIAL', frequency:'Revisión técnica y cotización previa.'},
+    {service:'Acero de refuerzo', price:'ESPECIAL', frequency:'Revisión técnica y cotización previa.'},
+    {service:'Placa de carga / módulo K', price:'ESPECIAL', frequency:'Revisión técnica y cotización previa.'},
+    {service:'Traslados', price:'$250 / bloque de 10 km', frequency:'Mecánica de Suelos incluye 0-40 km redondos. Los demás servicios incluyen 0-10 km redondos. Concreto, muestreo y recolección son visitas independientes.'}
+  ];
+
   /* ============ SEED DATA (examples) ============ */
   function seedData(){
     return {
+      priceList: REAL_PRICE_LIST,
       clients:[
         {name:'Desarrolladora Cumbres', contact:'Ing. Paola Serrano', phone:'55 2234 1190', email:'paola.serrano@cumbres.mx', address:'Torre Norte, Etapa 2', notes:'Solicita informes en PDF y físico.'},
         {name:'Constructora Nova', contact:'Arq. Beatriz León', phone:'55 4310 8827', email:'beatriz.leon@nova.com.mx', address:'Nave industrial Km 12', notes:'Paga por transferencia a 15 días.'},
@@ -825,6 +880,14 @@
             Promise.all(seed[c].map(doc=>db.collection(c).add(doc)))
           ));
           showBanner();
+        } else {
+          /* Instalación que ya tenía datos reales (órdenes, clientes…) desde
+             antes de que existiera la Lista de precios: se siembra aparte,
+             una sola vez, sin tocar nada de lo demás. */
+          const priceListSnap = snaps[COLLECTIONS.indexOf('priceList')];
+          if(priceListSnap && priceListSnap.empty){
+            await Promise.all(REAL_PRICE_LIST.map(doc=>db.collection('priceList').add(doc)));
+          }
         }
       }catch(e){ /* seeding is best-effort */ }
 
@@ -839,6 +902,13 @@
         COLLECTIONS.forEach(c=>{ state[c] = state[c].map(d=>({id:cryptoId(), ...d})); });
         writeJSON(STATE_CACHE_KEY, state);
         showBanner();
+      } else if(!state.priceList.length){
+        /* Copia local ya existente de antes de que hubiera Lista de
+           precios, y sin internet todavía: se siembra localmente para no
+           dejarla vacía. En cuanto haya conexión, initStore() hace lo
+           mismo en Firebase la próxima vez que abra la app. */
+        state.priceList = REAL_PRICE_LIST.map(d=>({id:cryptoId(), ...d}));
+        writeJSON(STATE_CACHE_KEY, state);
       }
     }
     renderAll();
@@ -1004,49 +1074,40 @@
     renderAll();
   }
   function renderLoginGate(){
-    const names = authState.names || [];
     return `<div class="panel" style="max-width:380px;margin:32px auto;">
       <div class="panel-head"><h3>🔒 Panel interno</h3></div>
       <form id="loginForm" style="padding:18px 20px;display:flex;flex-direction:column;gap:14px;">
         <div class="field">
           <label for="login_name">Tu nombre</label>
           <select id="login_name">
-            ${names.map(n=>`<option value="${esc(n)}">${esc(n)}</option>`).join('')}
-            <option value="__other__">Otro…</option>
+            ${ADMIN_NAMES.map(n=>`<option value="${esc(n)}">${esc(n)}</option>`).join('')}
           </select>
-        </div>
-        <div class="field" id="login_other_wrap" ${names.length?'hidden':''}>
-          <label for="login_other">Escribe tu nombre</label>
-          <input id="login_other" type="text" placeholder="Tu nombre completo">
         </div>
         <div class="field">
           <label for="login_pw">Contraseña</label>
           <input id="login_pw" type="password" required placeholder="Contraseña del panel interno">
         </div>
         <div id="loginError" class="row-sub" style="color:var(--danger)" hidden>Contraseña incorrecta.</div>
+        <div class="row-sub" style="margin-top:-4px">El panel interno es solo para dirección general y jefaturas. El resto del equipo trabaja desde la pestaña Órdenes.</div>
         <button type="submit" class="btn btn-accent" style="justify-content:center">Entrar</button>
       </form>
     </div>`;
   }
   function bindLoginForm(){
     const sel = document.getElementById('login_name');
-    const otherWrap = document.getElementById('login_other_wrap');
-    if(sel && otherWrap){
-      otherWrap.hidden = sel.value !== '__other__';
-      sel.addEventListener('change', ()=>{ otherWrap.hidden = sel.value !== '__other__'; });
-    }
     const form = document.getElementById('loginForm');
     if(!form) return;
     form.addEventListener('submit', async (e)=>{
       e.preventDefault();
       const pw = document.getElementById('login_pw').value;
+      const name = sel ? sel.value : '';
+      /* Solo las personas de ADMIN_NAMES pueden entrar, aunque alguien más
+         llegara a saber la contraseña: el nombre viene de una lista fija,
+         no de texto libre, así que esta verificación es redundante con el
+         <select> pero se deja como respaldo si el markup cambiara. */
+      if(!ADMIN_NAMES.includes(name)){ document.getElementById('loginError').hidden = false; return; }
       const ok = await checkPassword(pw);
       if(!ok){ document.getElementById('loginError').hidden = false; return; }
-      let name = sel ? sel.value : '';
-      if(!name || name==='__other__'){
-        const other = document.getElementById('login_other');
-        name = (other && other.value.trim()) || 'Sin nombre';
-      }
       await completeLogin(name);
     });
   }
@@ -1316,6 +1377,7 @@
     else if(currentTab==='orders'){ c.innerHTML = renderOrders(); bindOrderCards(); }
     else if(currentTab==='access'){ c.innerHTML = renderAccessLog(); bindAccessLogActions(); }
     else if(currentTab==='receivables'){ c.innerHTML = renderOrderCobrosPanel() + renderTable(currentTab); }
+    else if(currentTab==='priceList'){ c.innerHTML = renderPriceListNote() + renderTable(currentTab); }
     else { c.innerHTML = renderTable(currentTab); }
     bindRowActions();
   }
@@ -1519,6 +1581,22 @@
           </tr>`,
         empty:{glyph:'📅',text:'No tienes citas agendadas.'}
       };
+    },
+    priceList(rows){
+      rows = [...rows].sort((a,b)=>(a.service||'').localeCompare(b.service||''));
+      return {
+        cols:['Servicio','Precio','Frecuencia / mínimo',''],
+        rowHtml: p=>`<tr data-id="${p.id}">
+            <td class="row-title">${esc(p.service)}</td>
+            <td>${esc(p.price)||'—'}</td>
+            <td class="row-sub">${esc(p.frequency)||'—'}</td>
+            <td class="row-actions">
+              <button class="btn btn-sm btn-ghost" data-act="edit" data-col="priceList">Editar</button>
+              <button class="btn btn-sm btn-danger-text" data-act="delete" data-col="priceList">Eliminar</button>
+            </td>
+          </tr>`,
+        empty:{glyph:'🏷️',text:'No tienes servicios registrados en tu lista de precios.'}
+      };
     }
   };
 
@@ -1552,6 +1630,18 @@
           <td><span class="pill ${r.saldo<=0?'pill-pagado':'pill-vencido'}">${r.saldo<=0?'Pagado':'Pendiente'}</span></td>
         </tr>`).join('')}</tbody>
       </table></div>
+    </div>`;
+  }
+
+  /* Nota fija arriba de la Lista de precios: solo visible dentro del panel
+     interno (esta pestaña ni siquiera aparece para quien no entró). */
+  function renderPriceListNote(){
+    return `<div class="panel">
+      <div class="panel-head"><h3>💰 Lista de precios y frecuencias de muestreo</h3></div>
+      <div class="row-sub" style="padding:0 18px 16px">
+        Guía interna de cotización. Solo visible aquí, dentro del Panel interno — el equipo que solo ve Órdenes nunca ve esta pestaña ni los precios.<br>
+        <strong>Regla de cálculo:</strong> cuando la frecuencia se determine por volumen, divide el volumen total entre la frecuencia indicada y redondea siempre hacia arriba al número entero de muestras.
+      </div>
     </div>`;
   }
 
@@ -1907,6 +1997,7 @@
       ${logHtml}
       <div class="panel">
         <div class="panel-head"><h3>Personas registradas</h3></div>
+        <div class="row-sub" style="padding:0 18px 10px">Esta lista es solo para el menú "¿Quién eres?" (filtra las órdenes pendientes de cada quien). No da acceso al panel interno — eso está limitado a ${ADMIN_NAMES.join(', ')}.</div>
         ${namesHtml}
         <form id="addNameForm" style="display:flex;gap:8px;padding:12px 18px 16px;">
           <input id="newNameInput" type="text" placeholder="Nombre completo" style="flex:1;border:1px solid var(--border);border-radius:9px;padding:8px 11px;background:var(--bg);color:var(--ink);font:inherit;">
