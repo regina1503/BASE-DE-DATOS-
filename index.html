@@ -536,7 +536,9 @@
       title:'Cita', titlePlural:'citas',
       fields:[
         {key:'title',label:'Motivo',type:'text',required:true,placeholder:'Visita de obra'},
-        {key:'person',label:'Con quién',type:'text',placeholder:'Ing. Ramírez, proveedor'},
+        {key:'orderId',label:'Orden relacionada (opcional)',type:'orderSelect'},
+        {key:'assignedTo',label:'¿Quién va?',type:'text',placeholder:'Ing. Rodrigo Paz'},
+        {key:'person',label:'Con quién (contacto en el lugar)',type:'text',placeholder:'Ing. Ramírez, proveedor'},
         {key:'date',label:'Fecha',type:'date',required:true},
         {key:'time',label:'Hora',type:'time'},
         {key:'location',label:'Lugar',type:'text',placeholder:'Oficina / obra / videollamada'}
@@ -1444,7 +1446,7 @@
       {label:'Tareas pendientes', value:pendingTasks.length, foot: overdueTasks.length? overdueTasks.length+' vencidas' : 'al corriente', cls: overdueTasks.length?'danger':''},
       {label:'Por cobrar', value:money(totalPorCobrar), foot: overdueReceivables.length? overdueReceivables.length+' cobro(s) vencido(s)' : pendingCount+' pendiente(s)', cls: overdueReceivables.length?'danger':''},
       {label:'Próxima entrega', value: upcomingDeliveries[0]? fmtDateShort(upcomingDeliveries[0].promised) : '—', foot: upcomingDeliveries[0]? upcomingDeliveries[0].order : 'sin pendientes', cls: lateDeliveries.length?'danger':''},
-      {label:'Próxima cita', value: nextAppt? fmtDateShort(nextAppt.date) : '—', foot: nextAppt? (nextAppt.title+(nextAppt.time?' · '+nextAppt.time:'')) : 'sin citas'},
+      {label:'Próxima cita', value: nextAppt? fmtDateShort(nextAppt.date) : '—', foot: nextAppt? (nextAppt.title+(nextAppt.time?' · '+nextAppt.time:'')+(nextAppt.orderId?(' · Orden '+(((state.orders||[]).find(o=>o.id===nextAppt.orderId)||{}).folio||'')):'')) : 'sin citas'},
       {label:'Próxima nómina', value: upcomingPayroll? fmtDateShort(upcomingPayroll.payday) : '—', foot: upcomingPayroll? upcomingPayroll.name+' · '+money(upcomingPayroll.salary) : 'sin empleados', cls: upcomingPayroll && upcomingPayroll.payday && upcomingPayroll.payday<TODAY ? 'warn':''}
     ];
 
@@ -1605,10 +1607,13 @@
     appointments(rows){
       rows = [...rows].sort((a,b)=>((a.date||'')+(a.time||'')).localeCompare((b.date||'')+(b.time||'')));
       return {
-        cols:['Motivo','Con quién','Fecha','Hora','Lugar',''],
-        rowHtml: a=>`<tr data-id="${a.id}">
-            <td class="row-title">${esc(a.title)}</td>
-            <td>${esc(a.person)||'—'}</td>
+        cols:['Motivo','Orden','¿Quién va?','Fecha','Hora','Lugar',''],
+        rowHtml: a=>{
+          const order = a.orderId ? (state.orders||[]).find(o=>o.id===a.orderId) : null;
+          return `<tr data-id="${a.id}">
+            <td><div class="row-title">${esc(a.title)}</div>${a.person?`<div class="row-sub">Con: ${esc(a.person)}</div>`:''}</td>
+            <td>${order?`<div class="row-title" style="font-size:12.5px">${esc(order.folio)}</div><div class="row-sub">${esc(order.client)}</div>`:'—'}</td>
+            <td>${esc(a.assignedTo)||'—'}</td>
             <td>${a.date? (a.date===TODAY?`<span class="pill pill-en-proceso">Hoy</span>`:fmtDate(a.date)):'—'}</td>
             <td class="num">${esc(a.time)||'—'}</td>
             <td>${esc(a.location)||'—'}</td>
@@ -1616,7 +1621,8 @@
               <button class="btn btn-sm btn-ghost" data-act="edit" data-col="appointments">Editar</button>
               <button class="btn btn-sm btn-danger-text" data-act="delete" data-col="appointments">Eliminar</button>
             </td>
-          </tr>`,
+          </tr>`;
+        },
         empty:{glyph:'📅',text:'No tienes citas agendadas.'}
       };
     },
@@ -1657,15 +1663,21 @@
     if(!rows.length) return '';
     return `<div class="panel">
       <div class="panel-head"><h3>Cobros por orden</h3></div>
+      <div class="row-sub" style="padding:0 18px 10px">Edítalos aquí mismo — no hace falta entrar a la orden en Órdenes.</div>
       <div class="table-wrap"><table>
-        <thead><tr><th>Folio</th><th>Cliente</th><th class="num">Costo</th><th class="num">Anticipo</th><th class="num">Saldo</th><th>Estado</th></tr></thead>
-        <tbody>${rows.map(r=>`<tr>
+        <thead><tr><th>Folio</th><th>Cliente</th><th class="num">Costo</th><th class="num">Anticipo</th><th class="num">Saldo</th><th>Estado</th><th></th></tr></thead>
+        <tbody>${rows.map(r=>`<tr data-id="${r.o.id}">
           <td class="row-title">${esc(r.o.folio)}</td>
           <td>${esc(r.o.client)}</td>
           <td class="num">${money(r.costo)}</td>
           <td class="num">${money(r.anticipo)}</td>
           <td class="num">${money(r.saldo)}</td>
           <td><span class="pill ${r.saldo<=0?'pill-pagado':'pill-vencido'}">${r.saldo<=0?'Pagado':'Pendiente'}</span></td>
+          <td class="row-actions">
+            <button class="btn btn-sm btn-ghost" data-act="editcosto" data-col="orders">Editar costo</button>
+            ${r.saldo>0?`<button class="btn btn-sm btn-ghost" data-act="addadvance" data-col="orders">+ Anticipo</button>`:''}
+            ${r.saldo>0?`<button class="btn btn-sm btn-ghost" data-act="markpaid" data-col="orders">Marcar pagado</button>`:''}
+          </td>
         </tr>`).join('')}</tbody>
       </table></div>
     </div>`;
@@ -1717,21 +1729,40 @@
           const next = order[Math.min(order.indexOf(doc.status)+1, order.length-1)];
           await patchDoc(col,id,{status:next});
         }
+        else if(act==='editcosto'){
+          const current = Number(doc.costo)||0;
+          const input = prompt('Costo total de esta orden (MXN):', current||'');
+          if(input===null) return;
+          const val = Number(input);
+          if(isNaN(val) || val<0) return;
+          await patchDoc(col,id,{costo:val});
+        }
         else if(act==='addadvance'){
-          const costo = Number(doc.amount)||0;
-          const currentAdvance = Number(doc.advance)||0;
+          /* Mismos botones sirven para "Cobros" (amount/advance/status) y
+             para las órdenes listadas en "Cobros por orden" (costo/anticipo,
+             sin status propio — el estado se calcula del saldo). */
+          const isOrder = col==='orders';
+          const costoKey = isOrder ? 'costo' : 'amount';
+          const anticipoKey = isOrder ? 'anticipo' : 'advance';
+          const costo = Number(doc[costoKey])||0;
+          const currentAdvance = Number(doc[anticipoKey])||0;
           const input = prompt('¿Cuánto te dieron de anticipo? (se suma al anticipo ya registrado: '+money(currentAdvance)+')', '');
           if(input===null) return;
           const add = Number(input);
           if(!add || add<=0) return;
           const newAdvance = costo>0 ? Math.min(currentAdvance+add, costo) : currentAdvance+add;
-          const patch = {advance:newAdvance};
-          if(costo>0 && newAdvance>=costo) patch.status = 'Pagado';
+          const patch = {[anticipoKey]:newAdvance};
+          if(!isOrder && costo>0 && newAdvance>=costo) patch.status = 'Pagado';
           await patchDoc(col,id,patch);
         }
         else if(act==='markpaid'){
-          const costo = Number(doc.amount)||0;
-          await patchDoc(col,id,{status:'Pagado', advance:costo});
+          const isOrder = col==='orders';
+          const costoKey = isOrder ? 'costo' : 'amount';
+          const anticipoKey = isOrder ? 'anticipo' : 'advance';
+          const costo = Number(doc[costoKey])||0;
+          const patch = {[anticipoKey]:costo};
+          if(!isOrder) patch.status = 'Pagado';
+          await patchDoc(col,id,patch);
         }
         else if(act==='deliver') await patchDoc(col,id,{status:'Entregado'});
         else if(act==='paynow'){
@@ -2216,6 +2247,17 @@
       return `<div class="field"><label for="f_${f.key}">${f.label}</label>
         <select id="f_${f.key}" ${req}>
           ${f.options.map(o=>`<option value="${o}" ${o===val?'selected':''}>${o}</option>`).join('')}
+        </select></div>`;
+    }
+    if(f.type==='orderSelect'){
+      /* Lista dinámica de órdenes (folio · cliente), calculada al abrir el
+         formulario — no puede vivir en SCHEMAS porque las órdenes cambian
+         todo el tiempo. Las más recientes primero. */
+      const orders = [...(state.orders||[])].sort((a,b)=>(b.folio||'').localeCompare(a.folio||''));
+      return `<div class="field"><label for="f_${f.key}">${f.label}</label>
+        <select id="f_${f.key}" ${req}>
+          <option value="">— Ninguna —</option>
+          ${orders.map(o=>`<option value="${o.id}" ${o.id===val?'selected':''}>${esc(o.folio)} · ${esc(o.client)}</option>`).join('')}
         </select></div>`;
     }
     if(f.type==='textarea'){
