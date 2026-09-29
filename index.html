@@ -1174,8 +1174,7 @@
     const el = document.getElementById('viewerNote');
     if(!el) return;
     if(viewerName){
-      const role = ROLE_BY_NAME[viewerName];
-      el.innerHTML = `👤 ${esc(viewerName)}${role?` <span style="opacity:.7">· ${esc(role)}</span>`:''} · <button class="link-btn" id="viewerChangeBtn">cambiar</button>`;
+      el.innerHTML = `👤 ${esc(viewerName)} · <button class="link-btn" id="viewerChangeBtn">cambiar</button>`;
     } else {
       el.innerHTML = `<button class="link-btn" id="viewerChangeBtn">👤 Decir quién eres</button>`;
     }
@@ -1206,7 +1205,7 @@
           <label for="viewer_name">¿Quién eres?</label>
           <select id="viewer_name">
             <option value="">Selecciona tu nombre…</option>
-            ${names.map(n=>`<option value="${esc(n)}" ${n===viewerName?'selected':''}>${esc(n)}${ROLE_BY_NAME[n]?' — '+esc(ROLE_BY_NAME[n]):''}</option>`).join('')}
+            ${names.map(n=>`<option value="${esc(n)}" ${n===viewerName?'selected':''}>${esc(n)}</option>`).join('')}
             <option value="__other__" ${viewerName && !names.includes(viewerName)?'selected':''}>Otro…</option>
           </select>
         </div>
@@ -2440,7 +2439,7 @@
       return `<div class="field"><label for="f_${f.key}">${f.label}</label>
         <select id="f_${f.key}" ${req}>
           <option value="">— Sin asignar —</option>
-          ${TEAM_ROSTER.map(p=>`<option value="${esc(p.name)}" ${p.name===val?'selected':''}>${esc(p.name)} — ${esc(p.role)}</option>`).join('')}
+          ${TEAM_ROSTER.map(p=>`<option value="${esc(p.name)}" ${p.name===val?'selected':''}>${esc(p.name)}</option>`).join('')}
         </select></div>`;
     }
     if(f.type==='textarea'){
