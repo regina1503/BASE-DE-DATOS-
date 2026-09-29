@@ -647,6 +647,9 @@
      interno, no otorga ningún permiso extra, solo sirve para mostrarle a
      cada quien sus órdenes pendientes y avisarle cuando le asignan algo. */
   const VIEWER_KEY      = 'cg_viewer_v1';
+  /* Para no repetir el mismo aviso del navegador varias veces el mismo día
+     a la misma persona (renderAll se llama muy seguido). */
+  const NOTIF_SHOWN_KEY = 'cg_notif_shown_v1';
   /* Contraseña de fábrica del panel interno — cámbiala desde la pestaña
      Accesos en cuanto entres la primera vez. */
   const DEFAULT_PASSWORD = 'suelos2024';
@@ -1439,6 +1442,7 @@
     else if(currentTab==='priceList'){ c.innerHTML = renderPriceListNote() + renderTable(currentTab); }
     else { c.innerHTML = renderTable(currentTab); }
     bindRowActions();
+    maybeNotifyToday();
   }
   function renderCurrentTab(){ renderAll(); }
 
@@ -1857,6 +1861,34 @@
     if(!viewerName) return 0;
     return myPendingOrders().length + mySampleTestsDue().length + myUpcomingAppointments().length;
   }
+
+  /* ============ AVISO DEL NAVEGADOR (funciona mientras la página está
+     abierta o en segundo plano — no requiere nada de Firebase) ============
+     Si la persona ya dijo quién es y ya aceptó el permiso de
+     notificaciones, cuando abre la app (o mientras la deja abierta) le
+     salta un aviso si hoy tiene cita o le vence una prueba. Se muestra
+     como mucho una vez por día por persona, para no ser molesto. */
+  function maybeNotifyToday(){
+    if(!viewerName) return;
+    if(typeof Notification==='undefined') return;
+    if(Notification.permission!=='granted') return;
+    const flag = readJSON(NOTIF_SHOWN_KEY, null);
+    if(flag && flag.date===TODAY && flag.viewer===viewerName) return; // ya se avisó hoy
+    const appts = myUpcomingAppointments().filter(a=>a.date===TODAY);
+    const tests = mySampleTestsDue().filter(t=> t.due.toISOString().slice(0,10)<=TODAY);
+    const parts = [];
+    if(appts.length) parts.push(appts.length+' cita'+(appts.length===1?'':'s')+' hoy');
+    if(tests.length) parts.push(tests.length+' prueba'+(tests.length===1?'':'s')+' de laboratorio por hacer');
+    writeJSON(NOTIF_SHOWN_KEY, {date:TODAY, viewer:viewerName}); // se marca aunque no haya nada, así no revisa de más
+    if(!parts.length) return;
+    try{
+      const n = new Notification('Cuartel General', {
+        body: 'Hoy tienes: '+parts.join(' · ')+'. Abre Mi agenda para ver el detalle.',
+        tag: 'cg-hoy-'+TODAY
+      });
+      n.onclick = ()=>{ window.focus(); };
+    }catch(e){ /* algunos navegadores en móvil no dejan crear Notification directo; se ignora */ }
+  }
   function renderMyAgenda(){
     if(!viewerName){
       return `<div class="panel"><div class="empty-state">
@@ -1907,11 +1939,28 @@
         </div>`;
       }).join('')}
     </div>` : '';
-    return ordersHtml + testsHtml + apptsHtml;
+    const notifSupported = typeof Notification!=='undefined';
+    const notifBanner = (notifSupported && Notification.permission==='default') ? `<div class="panel">
+      <div class="row-sub" style="padding:14px 18px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+        🔔 Activa los avisos para que el navegador te diga cuando tengas una cita hoy o te toque una prueba de laboratorio.
+        <button class="btn btn-sm btn-accent" id="enableNotifBtn">Activar avisos</button>
+      </div>
+    </div>` : (notifSupported && Notification.permission==='denied') ? `<div class="panel">
+      <div class="row-sub" style="padding:14px 18px">🔕 Bloqueaste los avisos de esta página. Actívalos desde el candado 🔒 junto a la dirección del navegador si los quieres de vuelta.</div>
+    </div>` : '';
+    return notifBanner + ordersHtml + testsHtml + apptsHtml;
   }
   function bindMyAgenda(){
     const btn = document.getElementById('myAgendaSetNameBtn');
     if(btn) btn.onclick = openViewerPrompt;
+    const notifBtn = document.getElementById('enableNotifBtn');
+    if(notifBtn) notifBtn.onclick = ()=>{
+      Notification.requestPermission().then(()=>{
+        renderAll();
+        maybeNotifyToday();
+        if(typeof registerPushForViewer==='function') registerPushForViewer();
+      });
+    };
   }
 
   function renderOrders(){
