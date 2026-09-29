@@ -464,6 +464,7 @@
   /* ============ SCHEMAS ============ */
   const TABS = [
     {key:'dashboard', label:'Resumen', icon:'home'},
+    {key:'myAgenda',   label:'Mi agenda', icon:'calendar'},
     {key:'orders',     label:'Órdenes', icon:'orders'},
     {key:'clients',    label:'Clientes', icon:'clients'},
     {key:'tasks',      label:'Tareas',   icon:'tasks'},
@@ -477,7 +478,7 @@
   /* Tabs visibles para cualquiera con el enlace (org). Todo lo demás sólo
      para quien puede editar el artefacto (dueño / administradores) —
      reforzado también del lado del servidor con las reglas de `db`. */
-  const PUBLIC_TABS = ['orders'];
+  const PUBLIC_TABS = ['orders','myAgenda'];
 
   const SCHEMAS = {
     clients:{
@@ -537,7 +538,7 @@
       fields:[
         {key:'title',label:'Motivo',type:'text',required:true,placeholder:'Visita de obra'},
         {key:'orderId',label:'Orden relacionada (opcional)',type:'orderSelect'},
-        {key:'assignedTo',label:'¿Quién va?',type:'text',placeholder:'Ing. Rodrigo Paz'},
+        {key:'assignedTo',label:'¿Quién va?',type:'teamSelect'},
         {key:'person',label:'Con quién (contacto en el lugar)',type:'text',placeholder:'Ing. Ramírez, proveedor'},
         {key:'date',label:'Fecha',type:'date',required:true},
         {key:'time',label:'Hora',type:'time'},
@@ -584,7 +585,7 @@
           'Placa de carga / módulo K',
           'Otro'
         ],default:'Mecánica de suelos - privado'},
-        {key:'assignedTo',label:'¿Quién la hará?',type:'text',placeholder:'Ing. Rodrigo Paz'},
+        {key:'assignedTo',label:'¿Quién la hará?',type:'teamSelect'},
         {key:'priority',label:'Prioridad',type:'select',options:['Alta','Media','Baja'],default:'Media'},
         {key:'notes',label:'Notas',type:'textarea',placeholder:'Número de sondeos, profundidad, ensayos requeridos…'}
       ]
@@ -649,11 +650,25 @@
   /* Contraseña de fábrica del panel interno — cámbiala desde la pestaña
      Accesos en cuanto entres la primera vez. */
   const DEFAULT_PASSWORD = 'suelos2024';
-  /* Personas del organigrama que SÍ pueden usar "¿Quién eres?" para
-     filtrar sus pendientes — es decir, todo el equipo menos dirección
-     general y las dos jefaturas (Iván, Regina y Claudia), que en vez de
-     eso entran directo al Panel interno. */
-  const DEFAULT_NAMES = ['Alejandro Ibarra Torres','Fernando Cervantes Vázquez','Luis David Silva Gómez','Daniel Arcibar Padrón'];
+  /* Organigrama completo de la empresa: nombre + puesto. Se usa para
+     "¿Quién eres?" (con su puesto junto al nombre) y para el menú "¿Quién
+     la hará?" / "¿Quién va?" al asignar órdenes y citas, así todos
+     escogen su nombre de una lista fija en vez de teclearlo distinto cada
+     vez (lo que rompería el filtro de "Mis pendientes"). */
+  const TEAM_ROSTER = [
+    {name:'Iván Torres Sierra',           role:'Dirección General'},
+    {name:'Alejandro Ibarra Torres',      role:'Servicios Técnicos'},
+    {name:'Regina Contreras Ruiz',        role:'Servicios Administrativos'},
+    {name:'Claudia Torres Sierra',        role:'Servicios Financieros'},
+    {name:'Fernando Cervantes Vázquez',   role:'Analista de Control de Calidad'},
+    {name:'Luis David Silva Gómez',       role:'Analista de Laboratorio'},
+    {name:'Daniel Arcibar Padrón',        role:'Auxiliar Técnico'}
+  ];
+  const ROLE_BY_NAME = Object.fromEntries(TEAM_ROSTER.map(p=>[p.name,p.role]));
+  /* Todo el organigrama puede usar "¿Quién eres?" para ver sus pendientes
+     en Mi agenda — incluye también a dirección/jefaturas, que además
+     tienen su propio acceso al Panel interno por separado. */
+  const DEFAULT_NAMES = TEAM_ROSTER.map(p=>p.name);
   /* Únicas personas que pueden entrar al Panel interno (precios, cobros,
      sueldos, accesos, etc.). Todos los demás solo ven la pestaña Órdenes,
      sin importar que sepan la contraseña. Según el organigrama: dirección
@@ -1159,7 +1174,8 @@
     const el = document.getElementById('viewerNote');
     if(!el) return;
     if(viewerName){
-      el.innerHTML = `👤 ${esc(viewerName)} · <button class="link-btn" id="viewerChangeBtn">cambiar</button>`;
+      const role = ROLE_BY_NAME[viewerName];
+      el.innerHTML = `👤 ${esc(viewerName)}${role?` <span style="opacity:.7">· ${esc(role)}</span>`:''} · <button class="link-btn" id="viewerChangeBtn">cambiar</button>`;
     } else {
       el.innerHTML = `<button class="link-btn" id="viewerChangeBtn">👤 Decir quién eres</button>`;
     }
@@ -1190,7 +1206,7 @@
           <label for="viewer_name">¿Quién eres?</label>
           <select id="viewer_name">
             <option value="">Selecciona tu nombre…</option>
-            ${names.map(n=>`<option value="${esc(n)}" ${n===viewerName?'selected':''}>${esc(n)}</option>`).join('')}
+            ${names.map(n=>`<option value="${esc(n)}" ${n===viewerName?'selected':''}>${esc(n)}${ROLE_BY_NAME[n]?' — '+esc(ROLE_BY_NAME[n]):''}</option>`).join('')}
             <option value="__other__" ${viewerName && !names.includes(viewerName)?'selected':''}>Otro…</option>
           </select>
         </div>
@@ -1345,6 +1361,7 @@
     function tabBtn(t){
       let right = '';
       if(t.key==='access') right = `<span class="count">${accessLogEntries.length}</span>`;
+      else if(t.key==='myAgenda') right = myAgendaCount() ? `<span class="count">${myAgendaCount()}</span>` : '';
       else if(t.key!=='dashboard') right = `<span class="count">${state[t.key].length}</span>`;
       return `<button class="tab-btn ${t.key===currentTab?'active':''}" data-tab="${t.key}">
         ${ICONS[t.icon]}<span>${t.label}</span>${right}
@@ -1396,6 +1413,9 @@
     } else if(currentTab==='access'){
       subEl.textContent = accessLogEntries.length + ' accesos registrados';
       addBtn.hidden = true;
+    } else if(currentTab==='myAgenda'){
+      subEl.textContent = viewerName ? 'Lo que te toca hacer, con fecha' : 'Di quién eres para ver lo tuyo';
+      addBtn.hidden = true;
     } else {
       const s = SCHEMAS[currentTab];
       subEl.textContent = state[currentTab].length + ' ' + s.titlePlural;
@@ -1414,6 +1434,7 @@
     if(currentTab==='login'){ c.innerHTML = renderLoginGate(); bindLoginForm(); }
     else if(currentTab==='dashboard'){ c.innerHTML = renderDashboard(); }
     else if(currentTab==='orders'){ c.innerHTML = renderOrders(); bindOrderCards(); }
+    else if(currentTab==='myAgenda'){ c.innerHTML = renderMyAgenda(); bindMyAgenda(); }
     else if(currentTab==='access'){ c.innerHTML = renderAccessLog(); bindAccessLogActions(); }
     else if(currentTab==='receivables'){ c.innerHTML = renderOrderCobrosPanel() + renderTable(currentTab); }
     else if(currentTab==='priceList'){ c.innerHTML = renderPriceListNote() + renderTable(currentTab); }
@@ -1790,6 +1811,110 @@
   function isMine(o){
     return !!(viewerName && o.assignedTo && o.assignedTo.trim().toLowerCase()===viewerName.trim().toLowerCase());
   }
+
+  /* ============ MI AGENDA (para todo el que no entra al Panel interno) ============
+     Une, en un solo lugar y ordenado por fecha, las tres cosas que a un
+     trabajador de campo/laboratorio le toca hacer: sus órdenes asignadas,
+     las pruebas de muestras (7/14/28 días) que se le vencen, y sus citas.
+     Todo filtrado por "¿Quién eres?" — nadie ve lo de los demás aquí. */
+  function sameName(a,b){
+    return !!(a && b && a.trim().toLowerCase()===b.trim().toLowerCase());
+  }
+  function isoPlusDays(iso, n){
+    const d = new Date(iso);
+    d.setDate(d.getDate()+n);
+    return d;
+  }
+  function myPendingOrders(){
+    return state.orders
+      .filter(o=>isMine(o) && o.currentStage!=='entregada')
+      .map(o=>{
+        const last = (o.events||[]).slice(-1)[0];
+        const days = last ? daysSinceISO(last.at) : 0;
+        return {o, days};
+      })
+      .sort((a,b)=> b.days-a.days);
+  }
+  function mySampleTestsDue(){
+    const items = [];
+    state.orders.filter(isMine).forEach(o=>{
+      (o.samples||[]).forEach((s,i)=>{
+        if(!s.collected || !s.collectedAt) return;
+        [['t7',7,'7 días'],['t14',14,'14 días'],['t28',28,'28 días']].forEach(([key,n,label])=>{
+          if(s[key]) return; // ya hecha
+          const due = isoPlusDays(s.collectedAt, n);
+          items.push({o, sampleIndex:i, label, due});
+        });
+      });
+    });
+    return items.sort((a,b)=> a.due-b.due);
+  }
+  function myUpcomingAppointments(){
+    return state.appointments
+      .filter(a=> sameName(a.assignedTo, viewerName) && (!a.date || a.date>=TODAY))
+      .sort((a,b)=>((a.date||'')+(a.time||'')).localeCompare((b.date||'')+(b.time||'')));
+  }
+  function myAgendaCount(){
+    if(!viewerName) return 0;
+    return myPendingOrders().length + mySampleTestsDue().length + myUpcomingAppointments().length;
+  }
+  function renderMyAgenda(){
+    if(!viewerName){
+      return `<div class="panel"><div class="empty-state">
+        <div class="glyph">👋</div>
+        <p>Dinos quién eres para mostrarte solo lo tuyo: tus órdenes, tus pruebas de laboratorio y tus citas.</p>
+        <button class="btn btn-accent" id="myAgendaSetNameBtn">Decir quién eres</button>
+      </div></div>`;
+    }
+    const orders = myPendingOrders();
+    const tests = mySampleTestsDue();
+    const appts = myUpcomingAppointments();
+    if(!orders.length && !tests.length && !appts.length){
+      return `<div class="panel"><div class="empty-state">
+        <div class="glyph">✅</div>
+        <p>No tienes nada pendiente por ahora, ${esc(viewerName)}.</p>
+      </div></div>`;
+    }
+    const ordersHtml = orders.length ? `<div class="panel">
+      <div class="panel-head"><h3>📋 Tus órdenes (${orders.length})</h3></div>
+      ${orders.map(({o,days})=>`<div class="attn-row">
+        <span class="swatch ${days>=STALL_DAYS?'danger':'accent'}"></span>
+        <span class="tag">Orden</span>
+        <span class="title">${esc(o.folio)} · ${esc(o.client)}</span>
+        <span class="meta">${stageLabel(o.currentStage)}${days? ' · sin avance hace '+days+' día'+(days===1?'':'s') : ''}</span>
+      </div>`).join('')}
+    </div>` : '';
+    const testsHtml = tests.length ? `<div class="panel">
+      <div class="panel-head"><h3>🧪 Pruebas de laboratorio (${tests.length})</h3></div>
+      ${tests.map(t=>{
+        const overdue = t.due <= new Date();
+        return `<div class="attn-row">
+          <span class="swatch ${overdue?'danger':'warn'}"></span>
+          <span class="tag">Muestra</span>
+          <span class="title">Prueba ${t.label} · Muestra ${t.sampleIndex+1} · ${esc(t.o.folio)}</span>
+          <span class="meta">${esc(t.o.client)} · ${overdue?'vencida':'vence'} ${fmtDate(t.due.toISOString().slice(0,10))}</span>
+        </div>`;
+      }).join('')}
+    </div>` : '';
+    const apptsHtml = appts.length ? `<div class="panel">
+      <div class="panel-head"><h3>📅 Tus citas (${appts.length})</h3></div>
+      ${appts.map(a=>{
+        const order = a.orderId ? state.orders.find(o=>o.id===a.orderId) : null;
+        return `<div class="attn-row">
+          <span class="swatch ${a.date===TODAY?'accent':''}"></span>
+          <span class="tag">Cita</span>
+          <span class="title">${esc(a.title)}${order?' · '+esc(order.folio):''}</span>
+          <span class="meta">${a.date?(a.date===TODAY?'Hoy':fmtDate(a.date)):'—'}${a.time?' · '+esc(a.time):''}${a.location?' · '+esc(a.location):''}</span>
+        </div>`;
+      }).join('')}
+    </div>` : '';
+    return ordersHtml + testsHtml + apptsHtml;
+  }
+  function bindMyAgenda(){
+    const btn = document.getElementById('myAgendaSetNameBtn');
+    if(btn) btn.onclick = openViewerPrompt;
+  }
+
   function renderOrders(){
     if(!state.orders.length){
       return `<div class="panel"><div class="empty-state">
@@ -1940,6 +2065,11 @@
         await patchDoc('orders', o.id, {costo, anticipo});
         renderOrderDetail({...o, costo, anticipo});
       });
+      const useSuggestedBtn = document.getElementById('useSuggestedCosto');
+      if(useSuggestedBtn) useSuggestedBtn.onclick = ()=>{
+        const suggestion = suggestOrderCosto(o);
+        if(suggestion) document.getElementById('fin_costo').value = suggestion.total;
+      };
     }
   }
 
@@ -2024,15 +2154,58 @@
       });
     });
   }
+  /* ============ SUGERENCIA DE COSTO (Panel interno) ============
+     El costo depende del servicio Y de cuántas muestras lleva la orden, no
+     es un número fijo. Aquí se lee el precio de la Lista de precios y se
+     multiplica por el número de muestras registradas — nunca se guarda
+     solo, siempre hay que darle clic a "Usar este monto" y luego Guardar,
+     así el número final sigue siendo decisión de quien está en el panel. */
+  function parsePriceAmounts(str){
+    if(!str) return [];
+    return [...String(str).matchAll(/\$([\d,]+(?:\.\d+)?)/g)].map(m=>Number(m[1].replace(/,/g,'')));
+  }
+  function priceIsPerUnit(str){
+    return /\/\s*(muestra|sondeo|m|hora|pieza|cm|cilindro)\b/i.test(str||'');
+  }
+  function suggestOrderCosto(o){
+    if(!o.serviceType) return null;
+    const svc = (state.priceList||[]).find(p=>p.service===o.serviceType);
+    if(!svc) return null;
+    const amounts = parsePriceAmounts(svc.price);
+    if(!amounts.length) return null; // ESPECIAL / Según material / etc. — no hay número que sugerir
+    const n = Math.max((o.samples||[]).length, 1);
+    let total, detail;
+    if(amounts.length>=2){
+      /* Formato "1a: $X / 2a y sig.: $Y" — precio distinto para la primera
+         muestra y las adicionales (igual que Concreto en tu lista). */
+      const [first, rest] = amounts;
+      total = first + Math.max(n-1,0)*rest;
+      detail = n>1 ? `1ª muestra ${money(first)} + ${n-1} adicional(es) × ${money(rest)}` : `1ª muestra: ${money(first)}`;
+    } else if(priceIsPerUnit(svc.price)){
+      total = amounts[0]*n;
+      detail = `${money(amounts[0])} × ${n} muestra${n===1?'':'s'}`;
+    } else {
+      total = amounts[0];
+      detail = 'precio fijo del servicio';
+    }
+    return {total, detail, service:svc.service};
+  }
   function renderOrderFinance(o){
     const costo = Number(o.costo)||0;
     const anticipo = Number(o.anticipo)||0;
     const saldo = costo - anticipo;
     const statusLabel = costo<=0 ? 'Sin costo' : (saldo<=0 ? 'Pagado' : 'Pendiente');
     const statusPill = costo<=0 ? 'pill-baja' : (saldo<=0 ? 'pill-pagado' : 'pill-vencido');
+    const suggestion = suggestOrderCosto(o);
     return `
       <div class="order-meta" style="border-top:1px solid var(--border);border-bottom:none;padding-top:14px;margin-top:14px;">
         <div class="row-title" style="font-size:13.5px;margin-bottom:8px;">💰 Cobro de esta orden</div>
+        ${suggestion ? `
+          <div class="row-sub" style="margin-bottom:10px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+            💡 Sugerido según <strong>${esc(suggestion.service)}</strong>: <strong class="num">${money(suggestion.total)}</strong> (${esc(suggestion.detail)})
+            <button type="button" class="btn btn-sm btn-ghost" id="useSuggestedCosto">Usar este monto</button>
+          </div>` : (o.serviceType ? `
+          <div class="row-sub" style="margin-bottom:10px;">Este servicio no tiene precio fijo en tu Lista de precios (cotización especial) — captura el costo a mano.</div>` : '')}
         <form id="orderFinanceForm" class="field-row" style="flex-wrap:wrap;">
           <div class="field" style="min-width:120px;">
             <label for="fin_costo">Costo (MXN)</label>
@@ -2258,6 +2431,16 @@
         <select id="f_${f.key}" ${req}>
           <option value="">— Ninguna —</option>
           ${orders.map(o=>`<option value="${o.id}" ${o.id===val?'selected':''}>${esc(o.folio)} · ${esc(o.client)}</option>`).join('')}
+        </select></div>`;
+    }
+    if(f.type==='teamSelect'){
+      /* Nombre de cualquiera del organigrama (con su puesto en la
+         etiqueta) — el valor guardado es solo el nombre, para que calce
+         con "¿Quién eres?" y así "Mi agenda" les filtre lo suyo. */
+      return `<div class="field"><label for="f_${f.key}">${f.label}</label>
+        <select id="f_${f.key}" ${req}>
+          <option value="">— Sin asignar —</option>
+          ${TEAM_ROSTER.map(p=>`<option value="${esc(p.name)}" ${p.name===val?'selected':''}>${esc(p.name)} — ${esc(p.role)}</option>`).join('')}
         </select></div>`;
     }
     if(f.type==='textarea'){
