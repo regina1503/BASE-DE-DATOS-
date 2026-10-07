@@ -482,6 +482,18 @@
   </div>
 </div>
 
+<div class="modal-overlay" id="clientOverlay" hidden>
+  <div class="modal wide" role="dialog" aria-modal="true">
+    <div class="modal-head">
+      <h2 id="clientModalTitle">Cliente</h2>
+      <button class="icon-btn" id="clientModalClose" aria-label="Cerrar">✕</button>
+    </div>
+    <div id="clientModalBody" style="padding:18px 20px 20px;"></div>
+  </div>
+</div>
+
+<datalist id="clientNamesDatalist"></datalist>
+
 <script>
 (function(){
   "use strict";
@@ -500,18 +512,22 @@
     clients: '<svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 19c0-3.3 2.5-5.5 5.5-5.5s5.5 2.2 5.5 5.5"/><circle cx="17" cy="8.5" r="2.4"/><path d="M15.8 13.6c2.3.3 4 2.2 4 5.4"/></svg>',
     pricetag: '<svg viewBox="0 0 24 24"><path d="M11.5 4H5a1 1 0 0 0-1 1v6.5a1 1 0 0 0 .3.7l9 9a1 1 0 0 0 1.4 0l6.5-6.5a1 1 0 0 0 0-1.4l-9-9a1 1 0 0 0-.7-.3Z"/><circle cx="8.5" cy="8.5" r="1.4"/></svg>',
     trash: '<svg viewBox="0 0 24 24"><path d="M4.5 7h15"/><path d="M9 7V5a1.5 1.5 0 0 1 1.5-1.5h3A1.5 1.5 0 0 1 15 5v2"/><path d="M6.5 7l1 12.2A2 2 0 0 0 9.5 21h5a2 2 0 0 0 2-1.8L17.5 7"/><path d="M10 11v6M14 11v6"/></svg>',
-    workload: '<svg viewBox="0 0 24 24"><path d="M3.5 20.5h17"/><rect x="5.5" y="12.5" width="3.4" height="7.3" rx="0.8"/><rect x="10.3" y="7.5" width="3.4" height="12.3" rx="0.8"/><rect x="15.1" y="15" width="3.4" height="4.8" rx="0.8"/></svg>'
+    workload: '<svg viewBox="0 0 24 24"><path d="M3.5 20.5h17"/><rect x="5.5" y="12.5" width="3.4" height="7.3" rx="0.8"/><rect x="10.3" y="7.5" width="3.4" height="12.3" rx="0.8"/><rect x="15.1" y="15" width="3.4" height="4.8" rx="0.8"/></svg>',
+    expense: '<svg viewBox="0 0 24 24"><path d="M6 3h12v18l-2.5-1.6L13 21l-2.5-1.6L8 21l-2-1.6V3Z"/><path d="M9 8h6M9 12h6M9 16h3"/></svg>',
+    finance: '<svg viewBox="0 0 24 24"><path d="M3.5 19.5h17"/><path d="M4.5 15.5 9 11l3.5 3L19.5 6.5"/><path d="M14.5 6.5h5v5"/></svg>'
   };
 
   /* ============ SCHEMAS ============ */
   const TABS = [
     {key:'dashboard', label:'Resumen', icon:'home'},
+    {key:'finance',    label:'Finanzas', icon:'finance'},
     {key:'myAgenda',   label:'Mi agenda', icon:'calendar'},
     {key:'orders',     label:'Órdenes', icon:'orders'},
     {key:'workload',   label:'Carga de trabajo', icon:'workload'},
     {key:'clients',    label:'Clientes', icon:'clients'},
     {key:'tasks',      label:'Tareas',   icon:'tasks'},
     {key:'receivables',label:'Cobros',   icon:'money'},
+    {key:'expenses',   label:'Gastos',   icon:'expense'},
     {key:'employees',  label:'Sueldos',  icon:'payroll'},
     {key:'deliveries', label:'Entregas', icon:'truck'},
     {key:'appointments',label:'Citas',   icon:'calendar'},
@@ -641,6 +657,15 @@
         {key:'price',label:'Precio',type:'text',required:true,placeholder:'$13,000'},
         {key:'frequency',label:'Frecuencia / mínimo',type:'textarea',placeholder:'1 sondeo / 80 m de perímetro. Mínimo 2 sondeos de 3 m.'}
       ]
+    },
+    expenses:{
+      title:'Gasto', titlePlural:'gastos',
+      fields:[
+        {key:'concept',label:'Concepto',type:'text',required:true,placeholder:'Gasolina camioneta, renta de laboratorio…'},
+        {key:'category',label:'Categoría',type:'select',options:['Nómina','Renta','Equipo / herramienta','Combustible / viáticos','Servicios (luz, agua, internet)','Materiales / insumos','Mantenimiento','Impuestos','Otro'],default:'Otro'},
+        {key:'amount',label:'Monto (MXN)',type:'number',required:true,placeholder:'1500'},
+        {key:'date',label:'Fecha',type:'date',required:true}
+      ]
     }
   };
 
@@ -662,6 +687,16 @@
   /* Días sin avance a partir de los cuales una orden se marca como
      "atorada" en la vista de Órdenes y en el dashboard. */
   const STALL_DAYS = 4;
+  /* Servicios de concreto: las probetas no se recolectan en el momento del
+     trabajo de campo (tienen que curar), así que es fácil que se le pase a
+     alguien recolectarlas después — por eso se marcan aparte. */
+  const CONCRETE_SERVICE_REGEX = /concreto|probeta/i;
+  function needsSampleCollection(o){
+    if(o.currentStage!=='campo') return false;
+    const hasUncollected = (o.samples||[]).some(s=>!s.collected);
+    const isConcrete = CONCRETE_SERVICE_REGEX.test(o.serviceType||'');
+    return hasUncollected || isConcrete;
+  }
   function daysSinceISO(iso){
     if(!iso) return 0;
     const d = new Date(iso);
@@ -785,6 +820,8 @@
   /* null = nunca se le preguntó; '' = prefirió no decir; string = su nombre. */
   let viewerName = readJSON(VIEWER_KEY, null);
   let ordersFilterMine = false;
+  /* Periodo elegido en Finanzas para filtrar los gastos: 'month' | 'lastMonth' | 'year' | 'all'. */
+  let financePeriod = 'month';
 
   /* Contraseña con SHA-256 (Web Crypto): funciona sin internet, no depende
      de ningún servidor. */
@@ -878,6 +915,7 @@
   function seedData(){
     return {
       priceList: REAL_PRICE_LIST,
+      expenses:[],
       clients:[
         {name:'Desarrolladora Cumbres', contact:'Ing. Paola Serrano', phone:'55 2234 1190', email:'paola.serrano@cumbres.mx', address:'Torre Norte, Etapa 2', notes:'Solicita informes en PDF y físico.'},
         {name:'Constructora Nova', contact:'Arq. Beatriz León', phone:'55 4310 8827', email:'beatriz.leon@nova.com.mx', address:'Nave industrial Km 12', notes:'Paga por transferencia a 15 días.'},
@@ -1368,6 +1406,19 @@
     return id;
   }
 
+  /* Si el nombre de cliente capturado en una orden todavía no existe en
+     "Clientes", se da de alta solo con el nombre — así se va armando el
+     expediente del cliente sin que alguien tenga que acordarse de
+     registrarlo aparte, y queda listo para próximas órdenes (autocompletar,
+     historial). No duplica si ya existe (comparación sin mayúsculas/acentos). */
+  async function ensureClientExists(name){
+    name = (name||'').toString().trim();
+    if(!name) return;
+    const exists = (state.clients||[]).some(c=> foldText(c.name) === foldText(name));
+    if(exists) return;
+    await saveDoc('clients', null, {name});
+  }
+
   async function patchDoc(col, id, patch){
     const idx = state[col].findIndex(x=>x.id===id);
     if(idx>-1){ state[col][idx] = {...state[col][idx], ...patch}; writeJSON(STATE_CACHE_KEY, state); renderAll(); }
@@ -1492,6 +1543,7 @@
       else if(t.key==='myAgenda') right = myAgendaCount() ? `<span class="count">${myAgendaCount()}</span>` : '';
       else if(t.key==='trash') right = trashEntries.length ? `<span class="count">${trashEntries.length}</span>` : '';
       else if(t.key==='workload') right = '';
+      else if(t.key==='finance') right = '';
       else if(t.key!=='dashboard') right = `<span class="count">${state[t.key].length}</span>`;
       return `<button class="tab-btn ${t.key===currentTab?'active':''}" data-tab="${t.key}">
         ${ICONS[t.icon]}<span>${t.label}</span>${right}
@@ -1558,6 +1610,9 @@
     } else if(currentTab==='workload'){
       subEl.textContent = 'Órdenes abiertas por persona';
       addBtn.hidden = true;
+    } else if(currentTab==='finance'){
+      subEl.textContent = '¿Está ganando la empresa?';
+      addBtn.hidden = true;
     } else if(currentTab==='myAgenda'){
       subEl.textContent = viewerName ? 'Lo que te toca hacer, con fecha' : 'Di quién eres para ver lo tuyo';
       addBtn.hidden = true;
@@ -1583,13 +1638,23 @@
     else if(currentTab==='access'){ c.innerHTML = renderAccessLog(); bindAccessLogActions(); }
     else if(currentTab==='trash'){ c.innerHTML = renderTrash(); bindTrashActions(); }
     else if(currentTab==='workload'){ c.innerHTML = renderWorkload(); }
+    else if(currentTab==='finance'){ c.innerHTML = renderFinance(); bindFinance(); }
     else if(currentTab==='receivables'){ c.innerHTML = renderOrderCobrosPanel() + renderTable(currentTab); }
     else if(currentTab==='priceList'){ c.innerHTML = renderPriceListNote() + renderTable(currentTab); }
     else { c.innerHTML = renderTable(currentTab); }
     bindRowActions();
+    refreshClientsDatalist();
     maybeNotifyToday();
   }
   function renderCurrentTab(){ renderAll(); }
+  /* Lista de nombres de clientes ya registrados, para autocompletar el
+     campo "Cliente" al capturar una orden (datalist nativo del navegador). */
+  function refreshClientsDatalist(){
+    const dl = document.getElementById('clientNamesDatalist');
+    if(!dl) return;
+    const names = [...new Set((state.clients||[]).map(c=>c.name).filter(Boolean))].sort((a,b)=>a.localeCompare(b));
+    dl.innerHTML = names.map(n=>`<option value="${esc(n)}"></option>`).join('');
+  }
 
   /* ============ DASHBOARD ============ */
   function renderDashboard(){
@@ -1621,6 +1686,11 @@
 
     const attn = [];
     readyOrders.forEach(o=>attn.push({swatch:'accent',tag:'Orden',title:o.folio+' · '+o.client,meta:'lista para entregar'}));
+    state.orders.filter(needsSampleCollection).forEach(o=>{
+      const isConcrete = CONCRETE_SERVICE_REGEX.test(o.serviceType||'');
+      const pending = (o.samples||[]).filter(s=>!s.collected).length;
+      attn.push({swatch:'warn',tag:'Muestra',title:o.folio+' · '+o.client+(isConcrete?' · 🧱 Concreto':''),meta: pending>0 ? pending+' muestra'+(pending===1?'':'s')+' por recolectar' : 'registrar y recolectar muestra(s)'});
+    });
     activeOrders.filter(o=>o.currentStage!=='gabinete').forEach(o=>{
       const last = (o.events||[]).slice(-1)[0];
       if(last){
@@ -1666,17 +1736,22 @@
     clients(rows){
       rows = [...rows].sort((a,b)=>(a.name||'').localeCompare(b.name||''));
       return {
-        cols:['Cliente','Contacto','Teléfono','Correo',''],
-        rowHtml: c=>`<tr data-id="${c.id}">
+        cols:['Cliente','Contacto','Teléfono','Correo','Órdenes',''],
+        rowHtml: c=>{
+          const n = ordersForClient(c.name).length;
+          return `<tr data-id="${c.id}">
           <td><div class="row-title">${esc(c.name)}</div>${c.address?`<div class="row-sub">${esc(c.address)}</div>`:''}</td>
           <td>${esc(c.contact)||'—'}</td>
           <td>${c.phone?`<a href="tel:${esc(c.phone)}" style="color:inherit;">${esc(c.phone)}</a>`:'—'}</td>
           <td>${c.email?`<a href="mailto:${esc(c.email)}" style="color:inherit;">${esc(c.email)}</a>`:'—'}</td>
+          <td class="num">${n}</td>
           <td class="row-actions">
+            <button class="btn btn-sm btn-ghost" data-act="expediente" data-col="clients">📁 Expediente</button>
             <button class="btn btn-sm btn-ghost" data-act="edit" data-col="clients">Editar</button>
             <button class="btn btn-sm btn-danger-text" data-act="delete" data-col="clients">Eliminar</button>
           </td>
-        </tr>`,
+        </tr>`;
+        },
         empty:{glyph:'🧑‍💼',text:'No tienes clientes registrados.'}
       };
     },
@@ -1810,6 +1885,23 @@
           </tr>`,
         empty:{glyph:'🏷️',text:'No tienes servicios registrados en tu lista de precios.'}
       };
+    },
+    expenses(rows){
+      rows = [...rows].sort((a,b)=>(b.date||'').localeCompare(a.date||''));
+      return {
+        cols:['Concepto','Categoría','Monto','Fecha',''],
+        rowHtml: g=>`<tr data-id="${g.id}">
+            <td class="row-title">${esc(g.concept)}</td>
+            <td><span class="pill ${statusClass(g.category)}">${esc(g.category)||'Otro'}</span></td>
+            <td class="num">${money(g.amount)}</td>
+            <td>${g.date? fmtDate(g.date) : '—'}</td>
+            <td class="row-actions">
+              <button class="btn btn-sm btn-ghost" data-act="edit" data-col="expenses">Editar</button>
+              <button class="btn btn-sm btn-danger-text" data-act="delete" data-col="expenses">Eliminar</button>
+            </td>
+          </tr>`,
+        empty:{glyph:'💸',text:'No tienes gastos registrados todavía.'}
+      };
     }
   };
 
@@ -1825,6 +1917,13 @@
   function foldText(s){
     return (s||'').toString().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'');
   }
+  /* Todas las órdenes de un cliente, por nombre (sin importar mayúsculas o
+     acentos) — es lo que arma el "expediente" del cliente. */
+  function ordersForClient(name){
+    const key = foldText(name);
+    if(!key) return [];
+    return (state.orders||[]).filter(o=> foldText(o.client)===key);
+  }
   function searchResultLabel(col, doc){
     if(col==='orders') return {title: doc.folio||'(sin folio)', sub: [doc.client,doc.project].filter(Boolean).join(' · ')};
     if(col==='clients') return {title: doc.name||'(sin nombre)', sub: doc.contact||doc.phone||''};
@@ -1834,6 +1933,7 @@
     if(col==='deliveries') return {title: doc.order||'(sin pedido)', sub: doc.client||''};
     if(col==='appointments') return {title: doc.title||'(sin motivo)', sub: [doc.date,doc.assignedTo].filter(Boolean).join(' · ')};
     if(col==='priceList') return {title: doc.service||'', sub: doc.price||''};
+    if(col==='expenses') return {title: doc.concept||'(sin concepto)', sub: [doc.category, doc.date?fmtDate(doc.date):''].filter(Boolean).join(' · ')};
     return {title: doc.id, sub:''};
   }
   function searchAll(query){
@@ -2088,6 +2188,7 @@
         const doc = state[col].find(x=>x.id===id);
         if(!doc) return;
         if(act==='edit') openModal(col, doc);
+        else if(act==='expediente') openClientExpediente(doc);
         else if(act==='delete'){
           if(confirm('¿Eliminar este registro? Quedará en la Papelera 30 días por si lo necesitas de vuelta.')) await moveToTrash(col,id);
         }
@@ -2200,9 +2301,21 @@
       .filter(a=> sameName(a.assignedTo, viewerName) && (!a.date || a.date>=TODAY))
       .sort((a,b)=>((a.date||'')+(a.time||'')).localeCompare((b.date||'')+(b.time||'')));
   }
+  /* Órdenes asignadas a mí que ya salieron de trabajo de campo y todavía
+     tienen muestras por recolectar (o son de concreto, donde la
+     recolección casi siempre pasa después del trabajo de campo mismo). */
+  function mySamplesToCollect(){
+    return state.orders
+      .filter(o=> isMine(o) && needsSampleCollection(o))
+      .map(o=>({
+        o,
+        pending: (o.samples||[]).filter(s=>!s.collected).length,
+        isConcrete: CONCRETE_SERVICE_REGEX.test(o.serviceType||'')
+      }));
+  }
   function myAgendaCount(){
     if(!viewerName) return 0;
-    return myPendingOrders().length + mySampleTestsDue().length + myUpcomingAppointments().length;
+    return myPendingOrders().length + mySampleTestsDue().length + myUpcomingAppointments().length + mySamplesToCollect().length;
   }
 
   /* ============ AVISO DEL NAVEGADOR (funciona mientras la página está
@@ -2219,9 +2332,11 @@
     if(flag && flag.date===TODAY && flag.viewer===viewerName) return; // ya se avisó hoy
     const appts = myUpcomingAppointments().filter(a=>a.date===TODAY);
     const tests = mySampleTestsDue().filter(t=> t.due.toISOString().slice(0,10)<=TODAY);
+    const toCollect = mySamplesToCollect();
     const parts = [];
     if(appts.length) parts.push(appts.length+' cita'+(appts.length===1?'':'s')+' hoy');
     if(tests.length) parts.push(tests.length+' prueba'+(tests.length===1?'':'s')+' de laboratorio por hacer');
+    if(toCollect.length) parts.push(toCollect.length+' muestra'+(toCollect.length===1?'':'s')+' por recolectar');
     writeJSON(NOTIF_SHOWN_KEY, {date:TODAY, viewer:viewerName}); // se marca aunque no haya nada, así no revisa de más
     if(!parts.length) return;
     try{
@@ -2243,7 +2358,8 @@
     const orders = myPendingOrders();
     const tests = mySampleTestsDue();
     const appts = myUpcomingAppointments();
-    if(!orders.length && !tests.length && !appts.length){
+    const toCollect = mySamplesToCollect();
+    if(!orders.length && !tests.length && !appts.length && !toCollect.length){
       return `<div class="panel"><div class="empty-state">
         <div class="glyph">✅</div>
         <p>No tienes nada pendiente por ahora, ${esc(viewerName)}.</p>
@@ -2256,6 +2372,15 @@
         <span class="tag">Orden</span>
         <span class="title">${esc(o.folio)} · ${esc(o.client)}</span>
         <span class="meta">${stageLabel(o.currentStage)}${days? ' · sin avance hace '+days+' día'+(days===1?'':'s') : ''}</span>
+      </div>`).join('')}
+    </div>` : '';
+    const toCollectHtml = toCollect.length ? `<div class="panel">
+      <div class="panel-head"><h3>🧺 Muestras por recolectar (${toCollect.length})</h3></div>
+      ${toCollect.map(({o,pending,isConcrete})=>`<div class="attn-row">
+        <span class="swatch warn"></span>
+        <span class="tag">Muestra</span>
+        <span class="title">${esc(o.folio)} · ${esc(o.client)}${isConcrete?' · 🧱 Concreto':''}</span>
+        <span class="meta">${pending>0 ? pending+' muestra'+(pending===1?'':'s')+' sin recolectar' : 'confirma y registra la(s) muestra(s)'}</span>
       </div>`).join('')}
     </div>` : '';
     const testsHtml = tests.length ? `<div class="panel">
@@ -2291,7 +2416,7 @@
     </div>` : (notifSupported && Notification.permission==='denied') ? `<div class="panel">
       <div class="row-sub" style="padding:14px 18px">🔕 Bloqueaste los avisos de esta página. Actívalos desde el candado 🔒 junto a la dirección del navegador si los quieres de vuelta.</div>
     </div>` : '';
-    return notifBanner + ordersHtml + testsHtml + apptsHtml;
+    return notifBanner + toCollectHtml + ordersHtml + testsHtml + apptsHtml;
   }
   function bindMyAgenda(){
     const btn = document.getElementById('myAgendaSetNameBtn');
@@ -2366,6 +2491,7 @@
     if(o.assignedTo) subBits.push((isMine(o)?'⭐ ':'👷 ')+esc(o.assignedTo));
     if(last) subBits.push(esc(last.person)+' · '+relDay(last.at.slice(0,10)));
     if(isStalled) subBits.push(`<span style="color:var(--warn);font-weight:600;">⚠ sin avance hace ${stalledDays} días</span>`);
+    if(needsSampleCollection(o)) subBits.push(`<span style="color:var(--warn);font-weight:600;">🧺 recolectar muestra${CONCRETE_SERVICE_REGEX.test(o.serviceType||'')?' · 🧱 Concreto':''}</span>`);
     const pending = isPending('orders', o.id);
     if(pending) subBits.push(`<span style="color:var(--danger);font-weight:600;">⏳ sin confirmar en la nube</span>`);
     return `<div class="order-row ${isStalled?'order-row-stalled':''} ${isMine(o)?'order-row-mine':''}" data-id="${o.id}">
@@ -2443,6 +2569,148 @@
     const cards = people.map(p=>personCard(p.name, p.orders, false)).join('');
     return `<div class="row-sub" style="margin-bottom:12px;">Solo cuenta órdenes que todavía no se han entregado al cliente.</div>
       <div class="workload-grid">${unassignedCard}${cards}</div>`;
+  }
+
+  /* ============ FINANZAS: ¿está ganando la empresa? (panel interno) ============
+     Visión de dinero: lo que ya entró (cobrado), lo que falta por entrar
+     (pendiente) y lo que ha salido (gastos que tú vayas registrando en la
+     pestaña "Gastos" — incluida la nómina). Los cobros no tienen fecha de
+     pago individual todavía, así que "cobrado"/"pendiente" son montos
+     acumulados a la fecha; los gastos sí tienen fecha, por eso esos se
+     pueden filtrar por periodo. */
+  function moneyIn(){
+    const fromOrders = (state.orders||[]).reduce((s,o)=>s+(Number(o.anticipo)||0), 0);
+    const fromReceivables = (state.receivables||[]).reduce((s,r)=>s+(Number(r.advance)||0), 0);
+    return fromOrders + fromReceivables;
+  }
+  function moneyContracted(){
+    const fromOrders = (state.orders||[]).reduce((s,o)=>s+(Number(o.costo)||0), 0);
+    const fromReceivables = (state.receivables||[]).reduce((s,r)=>s+(Number(r.amount)||0), 0);
+    return fromOrders + fromReceivables;
+  }
+  function monthRange(offsetFromThisMonth){
+    const d = new Date(TODAY+'T00:00:00');
+    const y = d.getFullYear(), m = d.getMonth()+offsetFromThisMonth;
+    const start = new Date(y, m, 1);
+    const end = new Date(y, m+1, 0);
+    const iso = x => new Date(x.getTime()-x.getTimezoneOffset()*60000).toISOString().slice(0,10);
+    return {start: iso(start), end: iso(end)};
+  }
+  function financePeriodRange(period){
+    if(period==='month') return monthRange(0);
+    if(period==='lastMonth') return monthRange(-1);
+    if(period==='year') return {start: TODAY.slice(0,4)+'-01-01', end: TODAY.slice(0,4)+'-12-31'};
+    return {start:'0000-01-01', end:'9999-12-31'}; // 'all'
+  }
+  function expensesInPeriod(period){
+    const {start,end} = financePeriodRange(period);
+    return (state.expenses||[]).filter(g=> g.date && g.date>=start && g.date<=end);
+  }
+  function monthlyPayrollApprox(){
+    const factor = {Semanal:30/7, Quincenal:2, Mensual:1};
+    return (state.employees||[]).reduce((s,e)=> s+(Number(e.salary)||0)*(factor[e.frequency]||1), 0);
+  }
+  const FINANCE_PERIOD_LABELS = {month:'este mes', lastMonth:'el mes pasado', year:'este año', all:'desde siempre'};
+  function renderFinance(){
+    const cobrado = moneyIn();
+    const contratado = moneyContracted();
+    const pendiente = Math.max(0, contratado - cobrado);
+    const gastosPeriodo = expensesInPeriod(financePeriod);
+    const totalGastos = gastosPeriodo.reduce((s,g)=>s+(Number(g.amount)||0), 0);
+    const utilidad = cobrado - totalGastos;
+    const nomina = monthlyPayrollApprox();
+    const porCategoria = {};
+    gastosPeriodo.forEach(g=>{ const cat=g.category||'Otro'; porCategoria[cat]=(porCategoria[cat]||0)+(Number(g.amount)||0); });
+    const catRows = Object.entries(porCategoria).sort((a,b)=>b[1]-a[1]);
+    const maxCat = Math.max(1, ...catRows.map(r=>r[1]));
+
+    const periodOptions = [['month','Este mes'],['lastMonth','Mes pasado'],['year','Este año'],['all','Todo']];
+
+    return `
+      <div class="stat-grid">
+        <div class="stat-tile">
+          <div class="label">Cobrado a la fecha</div>
+          <div class="value">${money(cobrado)}</div>
+          <div class="foot">dinero que ya entró, acumulado</div>
+        </div>
+        <div class="stat-tile">
+          <div class="label">Por cobrar</div>
+          <div class="value">${money(pendiente)}</div>
+          <div class="foot">de ${money(contratado)} contratado en total</div>
+        </div>
+        <div class="stat-tile">
+          <div class="label">Gastos ${esc(FINANCE_PERIOD_LABELS[financePeriod])}</div>
+          <div class="value">${money(totalGastos)}</div>
+          <div class="foot">${gastosPeriodo.length} gasto${gastosPeriodo.length===1?'':'s'} registrado${gastosPeriodo.length===1?'':'s'}</div>
+        </div>
+        <div class="stat-tile" style="border-color:${utilidad>=0?'var(--good)':'var(--danger)'};">
+          <div class="label">Utilidad</div>
+          <div class="value" style="color:${utilidad>=0?'var(--good)':'var(--danger)'};">${money(utilidad)}</div>
+          <div class="foot">cobrado a la fecha menos gastos ${esc(FINANCE_PERIOD_LABELS[financePeriod])}</div>
+        </div>
+      </div>
+      <div class="row-sub" style="margin:-10px 0 16px;">
+        ${utilidad>=0
+          ? `✅ Con los gastos que llevas registrados, tu empresa va ganando ${money(utilidad)}.`
+          : `⚠️ Con los gastos que llevas registrados, vas perdiendo ${money(Math.abs(utilidad))}. Revisa qué estás gastando de más o qué te falta cobrar.`}
+        Esta cuenta es tan buena como los gastos que captures en la pestaña <strong>Gastos</strong> — si falta algo por registrar, la utilidad real será menor.
+      </div>
+
+      <div class="panel">
+        <div class="panel-head">
+          <h3>Gastos por categoría</h3>
+          <div class="order-filter-bar" style="margin:0;">
+            ${periodOptions.map(([key,label])=>`<button class="btn btn-sm ${financePeriod===key?'btn-accent':'btn-ghost'}" data-finance-period="${key}">${label}</button>`).join('')}
+          </div>
+        </div>
+        ${catRows.length ? catRows.map(([cat,amt])=>`
+          <div style="padding:8px 18px;">
+            <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px;">
+              <span>${esc(cat)}</span><span class="num">${money(amt)}</span>
+            </div>
+            <div class="workload-bar"><div class="workload-bar-fill" style="width:${Math.round(amt/maxCat*100)}%;background:var(--accent);"></div></div>
+          </div>`).join('') : `<div class="empty-state" style="padding:22px"><p>No hay gastos registrados ${esc(FINANCE_PERIOD_LABELS[financePeriod])}.</p></div>`}
+        <div style="padding:10px 18px 16px;">
+          <button class="btn btn-sm btn-ghost" id="goToExpensesBtn">+ Registrar gasto</button>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head"><h3>Nómina mensual aproximada</h3></div>
+        <div class="row-sub" style="padding:0 18px 10px">
+          Suma de los sueldos registrados en "Sueldos", normalizados a un mes (no se descuenta sola de la utilidad — regístrala en Gastos cuando la pagues).
+        </div>
+        <div style="padding:0 18px 16px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;">
+          <strong style="font-size:18px;">${money(nomina)}</strong>
+          <button class="btn btn-sm btn-ghost" id="registerPayrollBtn">+ Registrar nómina de este mes como gasto</button>
+        </div>
+      </div>
+    `;
+  }
+  function bindFinance(){
+    document.querySelectorAll('[data-finance-period]').forEach(btn=>{
+      btn.addEventListener('click', ()=>{ financePeriod = btn.dataset.financePeriod; renderAll(); });
+    });
+    const goBtn = document.getElementById('goToExpensesBtn');
+    if(goBtn) goBtn.onclick = ()=>{ currentTab='expenses'; renderAll(); openModal('expenses', null); };
+    const payrollBtn = document.getElementById('registerPayrollBtn');
+    if(payrollBtn) payrollBtn.onclick = async ()=>{
+      const employees = state.employees||[];
+      if(!employees.length){ alert('No tienes empleados registrados en "Sueldos" todavía.'); return; }
+      const monthKey = TODAY.slice(0,7);
+      const already = (state.expenses||[]).some(g=> g.category==='Nómina' && (g.date||'').slice(0,7)===monthKey);
+      if(already && !confirm('Ya parece haber gastos de Nómina registrados este mes. ¿Registrar de todas formas?')) return;
+      if(!confirm(`Esto va a crear ${employees.length} gasto(s) de categoría "Nómina", uno por cada empleado, con la fecha de hoy. ¿Continuar?`)) return;
+      for(const e of employees){
+        await saveDoc('expenses', null, {
+          concept: 'Nómina – '+(e.name||'empleado'),
+          category: 'Nómina',
+          amount: Number(e.salary)||0,
+          date: TODAY
+        });
+      }
+      renderAll();
+    };
   }
 
   const orderOverlay = document.getElementById('orderOverlay');
@@ -2731,6 +2999,7 @@
       data.currentStage = 'girada';
       data.events = [{stage:'girada', person:data.requestedBy, at:new Date().toISOString(), note:''}];
       const newId = await saveDoc('orders', null, data);
+      await ensureClientExists(data.client);
       pingOrder({...data, id:newId}, 'Te asignaron la orden '+(data.folio||'')+' ('+(data.client||'')+')');
       closeModal();
     };
@@ -2752,10 +3021,75 @@
       schema.fields.forEach(f=>{ data[f.key] = document.getElementById('f_'+f.key).value; });
       const reassigned = data.assignedTo && data.assignedTo!==o.assignedTo;
       await patchDoc('orders', o.id, data);
+      await ensureClientExists(data.client);
       if(reassigned) pingOrder({...o, ...data}, 'Te asignaron la orden '+(data.folio||o.folio||'')+' ('+(data.client||o.client||'')+')');
       closeModal();
     };
     setTimeout(()=>{ const first = modalForm.querySelector('input,select,textarea'); if(first) first.focus(); },10);
+  }
+
+  /* ============ EXPEDIENTE DE CLIENTE ============
+     Ficha de un cliente: sus datos de contacto y todas las órdenes que se
+     le han hecho a lo largo del tiempo (más, si es admin, cuánto ha
+     contratado/pagado/debe en total) — se arma solo, cruzando por nombre
+     de cliente, sin tener que llevar esa cuenta aparte. */
+  const clientOverlay = document.getElementById('clientOverlay');
+  function closeClientModal(){ clientOverlay.hidden = true; }
+  document.getElementById('clientModalClose').addEventListener('click', closeClientModal);
+  clientOverlay.addEventListener('click', (e)=>{ if(e.target===clientOverlay) closeClientModal(); });
+  function openClientExpediente(c){
+    document.getElementById('clientModalTitle').textContent = '📁 ' + (c.name||'Cliente');
+    const orders = ordersForClient(c.name).sort((a,b)=>(b.folio||'').localeCompare(a.folio||''));
+    const totalContratado = orders.reduce((s,o)=>s+(Number(o.costo)||0),0);
+    const totalCobrado = orders.reduce((s,o)=>s+(Number(o.anticipo)||0),0);
+    const totalSaldo = Math.max(0, totalContratado-totalCobrado);
+    const statsHtml = isAdmin ? `
+      <div class="stat-grid" style="margin-bottom:18px;">
+        <div class="stat-tile"><div class="label">Órdenes</div><div class="value">${orders.length}</div><div class="foot">histórico</div></div>
+        <div class="stat-tile"><div class="label">Contratado</div><div class="value">${money(totalContratado)}</div><div class="foot">suma de costos</div></div>
+        <div class="stat-tile"><div class="label">Cobrado</div><div class="value">${money(totalCobrado)}</div><div class="foot">anticipos recibidos</div></div>
+        <div class="stat-tile"><div class="label">Saldo</div><div class="value ${totalSaldo>0?'danger':''}">${money(totalSaldo)}</div><div class="foot">pendiente por cobrar</div></div>
+      </div>` : `<div class="row-sub" style="margin-bottom:14px;">${orders.length} orden${orders.length===1?'':'es'} registrada${orders.length===1?'':'s'} con este cliente.</div>`;
+    const infoHtml = `
+      <div class="panel" style="margin-bottom:18px;">
+        <div class="panel-head"><h3>Datos de contacto</h3>
+          <button class="btn btn-sm btn-ghost" id="editClientFromExpedienteBtn">Editar</button>
+        </div>
+        <div style="padding:12px 18px;display:flex;flex-direction:column;gap:4px;font-size:13.5px;">
+          ${c.contact?`<div>👤 ${esc(c.contact)}</div>`:''}
+          ${c.phone?`<div>📞 ${esc(c.phone)}</div>`:''}
+          ${c.email?`<div>✉️ ${esc(c.email)}</div>`:''}
+          ${c.address?`<div>📍 ${esc(c.address)}</div>`:''}
+          ${(!c.contact&&!c.phone&&!c.email&&!c.address)?'<div class="row-sub">Sin datos de contacto capturados.</div>':''}
+          ${c.notes?`<div class="row-sub" style="margin-top:6px;">${esc(c.notes)}</div>`:''}
+        </div>
+      </div>`;
+    const ordersHtml = orders.length ? `
+      <div class="panel">
+        <div class="panel-head"><h3>Trabajos (${orders.length})</h3></div>
+        ${orders.map(o=>{
+          const costo = Number(o.costo)||0, anticipo = Number(o.anticipo)||0, saldo = costo-anticipo;
+          return `<div class="attn-row" data-expediente-order="${o.id}" style="cursor:pointer;">
+            <span class="swatch ${o.currentStage==='entregada'?'':'accent'}"></span>
+            <span class="tag">${esc(stageLabel(o.currentStage))}</span>
+            <span class="title">${esc(o.folio)}${o.serviceType?' · '+esc(o.serviceType):''}</span>
+            <span class="meta">${o.project?esc(o.project)+' · ':''}${isAdmin && costo>0 ? 'Saldo: '+money(saldo) : ''}</span>
+          </div>`;
+        }).join('')}
+      </div>` : `<div class="panel"><div class="empty-state"><div class="glyph">🗂️</div><p>Este cliente todavía no tiene órdenes registradas.</p></div></div>`;
+    document.getElementById('clientModalBody').innerHTML = statsHtml + infoHtml + ordersHtml;
+    clientOverlay.hidden = false;
+    const editBtn = document.getElementById('editClientFromExpedienteBtn');
+    if(editBtn) editBtn.onclick = ()=>{ closeClientModal(); openModal('clients', c); };
+    document.querySelectorAll('[data-expediente-order]').forEach(el=>{
+      el.addEventListener('click', ()=>{
+        const id = el.dataset.expedienteOrder;
+        closeClientModal();
+        currentTab = 'orders';
+        renderAll();
+        openOrderDetail(id);
+      });
+    });
   }
 
   /* ============ ACCESOS (quién entró y cuándo) ============ */
@@ -2935,8 +3269,12 @@
       return `<div class="field"><label for="f_${f.key}">${f.label}</label>
         <textarea id="f_${f.key}" placeholder="${f.placeholder||''}">${esc(val)}</textarea></div>`;
     }
+    /* El campo "cliente" sugiere autocompletar con clientes ya registrados
+       (datalist, se llena en renderAll) para no terminar con el mismo
+       cliente escrito de dos formas distintas. */
+    const clientList = f.key==='client' ? ' list="clientNamesDatalist"' : '';
     return `<div class="field"><label for="f_${f.key}">${f.label}</label>
-      <input id="f_${f.key}" type="${f.type}" value="${esc(val)}" placeholder="${f.placeholder||''}" ${req}>
+      <input id="f_${f.key}" type="${f.type}" value="${esc(val)}" placeholder="${f.placeholder||''}" ${req}${clientList}>
       </div>`;
   }
   function closeModal(){ overlay.hidden = true; editing = {col:null,id:null}; }
@@ -2949,6 +3287,7 @@
     if(e.key!=='Escape') return;
     if(!overlay.hidden) closeModal();
     else if(!orderOverlay.hidden) closeOrderModal();
+    else if(!clientOverlay.hidden) closeClientModal();
     else if(!document.getElementById('viewerOverlay').hidden) closeViewerPrompt();
   });
 
