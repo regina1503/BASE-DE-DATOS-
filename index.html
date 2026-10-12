@@ -678,7 +678,7 @@
     {key:'campo',        label:'Trabajo de campo',        verb:'realiza el trabajo de campo',    color:'var(--accent)',    pill:'pill-progreso'},
     {key:'laboratorio',  label:'Recibida en laboratorio', verb:'la recibe en el laboratorio',    color:'var(--accent)',    pill:'pill-progreso'},
     {key:'analisis',     label:'En análisis',             verb:'realiza el análisis',            color:'var(--warn)',      pill:'pill-pendiente'},
-    {key:'lista',        label:'Lista / resultados',      verb:'confirma que está lista',        color:'var(--good)',      pill:'pill-hecho'},
+    {key:'lista',        label:'Laboratorio terminó',     verb:'confirma que el laboratorio terminó',        color:'var(--good)',      pill:'pill-hecho'},
     {key:'gabinete',     label:'Gabinete',                verb:'la pasa a gabinete',              color:'var(--warn)',      pill:'pill-pendiente'},
     {key:'entregada',    label:'Entregada al cliente',    verb:'la entrega al cliente',          color:'var(--good)',      pill:'pill-hecho'}
   ];
@@ -1460,7 +1460,7 @@
       data: {...doc},
       label: trashLabelFor(col, doc),
       deletedAt: new Date().toISOString(),
-      deletedBy: (session && session.name) || 'Panel interno'
+      deletedBy: currentPersonName() || 'Panel interno'
     };
     trashEntries = [entry, ...trashEntries].slice(0, 300);
     writeJSON(TRASH_CACHE_KEY, trashEntries);
@@ -1673,7 +1673,7 @@
     const nextAppt = upcomingAppts[0];
     const upcomingPayroll = [...state.employees].sort((a,b)=>(a.payday||'9999').localeCompare(b.payday||'9999'))[0];
     const activeOrders = state.orders.filter(o=>o.currentStage!=='entregada');
-    const readyOrders = state.orders.filter(o=>o.currentStage==='gabinete');
+    const readyOrders = state.orders.filter(o=>o.currentStage==='gabinete' || o.currentStage==='lista');
 
     const tiles = [
       {label:'Órdenes activas', value:activeOrders.length, foot: readyOrders.length? readyOrders.length+' lista(s) para entregar' : (state.orders.length? 'en proceso':'sin órdenes'), cls: readyOrders.length?'warn':''},
@@ -1691,7 +1691,7 @@
       const pending = (o.samples||[]).filter(s=>!s.collected).length;
       attn.push({swatch:'warn',tag:'Muestra',title:o.folio+' · '+o.client+(isConcrete?' · 🧱 Concreto':''),meta: pending>0 ? pending+' muestra'+(pending===1?'':'s')+' por recolectar' : 'registrar y recolectar muestra(s)'});
     });
-    activeOrders.filter(o=>o.currentStage!=='gabinete').forEach(o=>{
+    activeOrders.filter(o=>o.currentStage!=='gabinete' && o.currentStage!=='lista').forEach(o=>{
       const last = (o.events||[]).slice(-1)[0];
       if(last){
         const d = daysSinceISO(last.at);
@@ -2251,8 +2251,8 @@
     {label:'Orden girada',         color: stageInfo('girada').color,       stages:['girada']},
     {label:'Aceptada',             color: stageInfo('aceptada').color,     stages:['aceptada']},
     {label:'Trabajo de campo',     color: stageInfo('campo').color,        stages:['campo']},
-    {label:'Laboratorio',          color: stageInfo('laboratorio').color,  stages:['laboratorio','analisis','lista']},
-    {label:'Gabinete',             color: stageInfo('gabinete').color,     stages:['gabinete']},
+    {label:'Laboratorio',          color: stageInfo('laboratorio').color,  stages:['laboratorio','analisis']},
+    {label:'Gabinete',             color: stageInfo('gabinete').color,     stages:['lista','gabinete']},
     {label:'Entregada al cliente', color: stageInfo('entregada').color,    stages:['entregada']}
   ];
   function isMine(o){
@@ -2262,8 +2262,13 @@
   /* ============ MI AGENDA (para todo el que no entra al Panel interno) ============
      Une, en un solo lugar y ordenado por fecha, las tres cosas que a un
      trabajador de campo/laboratorio le toca hacer: sus órdenes asignadas,
-     las pruebas de muestras (7/14/28 días) que se le vencen, y sus citas.
+     las pruebas de muestras (7, 14 y 21–28 días) que se le vencen, y sus citas.
      Todo filtrado por "¿Quién eres?" — nadie ve lo de los demás aquí. */
+  /* Quién está usando la página ahora: lo que eligió en "¿Quién eres?",
+     o si no, el nombre con el que entró al panel interno. */
+  function currentPersonName(){
+    return (viewerName || (session && session.name) || '').trim();
+  }
   function sameName(a,b){
     return !!(a && b && a.trim().toLowerCase()===b.trim().toLowerCase());
   }
@@ -2287,10 +2292,12 @@
     state.orders.filter(isMine).forEach(o=>{
       (o.samples||[]).forEach((s,i)=>{
         if(!s.collected || !s.collectedAt) return;
-        [['t7',7,'7 días'],['t14',14,'14 días'],['t28',28,'28 días']].forEach(([key,n,label])=>{
+        /* [clave, día en que ya se puede hacer, día límite, etiqueta] */
+        [['t7',7,7,'7 días'],['t14',14,14,'14 días'],['t28',21,28,'21–28 días']].forEach(([key,from,to,label])=>{
           if(s[key]) return; // ya hecha
-          const due = isoPlusDays(s.collectedAt, n);
-          items.push({o, sampleIndex:i, label, due});
+          const due = isoPlusDays(s.collectedAt, from);
+          const dueBy = isoPlusDays(s.collectedAt, to);
+          items.push({o, sampleIndex:i, label, due, dueBy});
         });
       });
     });
@@ -2386,12 +2393,17 @@
     const testsHtml = tests.length ? `<div class="panel">
       <div class="panel-head"><h3>🧪 Pruebas de laboratorio (${tests.length})</h3></div>
       ${tests.map(t=>{
-        const overdue = t.due <= new Date();
+        const now = new Date();
+        const overdue = t.dueBy < now;
+        const open = !overdue && t.due <= now;
+        const dateTxt = t.due.getTime()===t.dueBy.getTime()
+          ? fmtDate(t.due.toISOString().slice(0,10))
+          : fmtDate(t.due.toISOString().slice(0,10))+' al '+fmtDate(t.dueBy.toISOString().slice(0,10));
         return `<div class="attn-row">
-          <span class="swatch ${overdue?'danger':'warn'}"></span>
+          <span class="swatch ${overdue?'danger':(open?'warn':'accent')}"></span>
           <span class="tag">Muestra</span>
           <span class="title">Prueba ${t.label} · Muestra ${t.sampleIndex+1} · ${esc(t.o.folio)}</span>
-          <span class="meta">${esc(t.o.client)} · ${overdue?'vencida':'vence'} ${fmtDate(t.due.toISOString().slice(0,10))}</span>
+          <span class="meta">${esc(t.o.client)} · ${overdue?'vencida — tocaba':(open?'toca ya':'toca')} ${dateTxt}</span>
         </div>`;
       }).join('')}
     </div>` : '';
@@ -2752,7 +2764,7 @@
           </div>`).join('')}
       </div>
       ${next
-        ? `<button class="btn btn-accent" id="advanceOrderBtn" style="width:100%;justify-content:center;margin-top:14px">Registrar: ${next.label}</button>`
+        ? `<button class="btn btn-accent" id="advanceOrderBtn" style="width:100%;justify-content:center;margin-top:14px">${next.key==='lista' ? '✅ Laboratorio terminó → pasar a Gabinete' : 'Registrar: '+next.label}</button>`
         : `<div class="empty-state" style="padding:14px 0 0"><p>Ciclo completo — orden entregada al cliente.</p></div>`
       }
       ${renderOrderSamples(o)}
@@ -2785,11 +2797,28 @@
     }
   }
 
-  /* ============ MUESTRAS (recolección + pruebas de 7/14/28 días) ============
+  /* ============ MUESTRAS (recolección + pruebas de 7, 14 y 21–28 días) ============
      Pensado sobre todo para órdenes de concreto (compresión/flexión), pero
      sirve para cualquier orden que maneje varias muestras. Visible para
      todo el que vea el detalle de la orden (campo y laboratorio incluidos),
      no solo el panel interno — es seguimiento de trabajo, no dinero. */
+  const SAMPLE_TESTS = [
+    {key:'t7',  label:'7 días'},
+    {key:'t14', label:'14 días'},
+    {key:'t28', label:'21–28 días'}
+  ];
+  function renderSampleTest(s, t){
+    const done = !!s[t.key];
+    const at = s[t.key+'At'];
+    const by = s[t.key+'By'];
+    return `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:3px 0;">
+      <label style="display:flex;align-items:center;gap:5px;cursor:pointer;min-width:132px;">
+        <input type="checkbox" data-sample-test="${t.key}" data-sample-id="${s.id}" ${done?'checked':''}>
+        Prueba ${t.label}
+      </label>
+      ${done && at ? `<span class="row-sub">${by?esc(by)+' · ':''}${fmtDateTime(at)}</span>` : ''}
+    </div>`;
+  }
   function renderOrderSamples(o){
     const samples = o.samples || [];
     return `
@@ -2797,26 +2826,14 @@
         <div class="row-title" style="font-size:13.5px;margin-bottom:8px;">🧪 Muestras (${samples.length})</div>
         ${samples.length ? samples.map((s,i)=>`
           <div class="attn-row" style="align-items:flex-start;flex-wrap:wrap;gap:10px;">
-            <div style="flex:1;min-width:160px;">
+            <div style="flex:1;min-width:200px;">
               <div class="row-title" style="font-size:13px;">Muestra ${i+1}</div>
               <div class="row-sub">${s.collected
-                ? '✅ Muestra recolectada'+(s.collectedAt?' · '+fmtDateTime(s.collectedAt):'')
+                ? '✅ Muestra recolectada'+(s.collectedBy?' por '+esc(s.collectedBy):'')+(s.collectedAt?' · '+fmtDateTime(s.collectedAt):'')
                 : '⏳ Muestra por recolectar'}</div>
-              ${s.collected ? `
-                <div class="row-sub" style="margin-top:6px;display:flex;gap:12px;flex-wrap:wrap;">
-                  <label style="display:flex;align-items:center;gap:5px;cursor:pointer;">
-                    <input type="checkbox" data-sample-test="t7" data-sample-id="${s.id}" ${s.t7?'checked':''}>
-                    Prueba 7 días${s.t7&&s.t7At?` (${fmtDateTime(s.t7At)})`:''}
-                  </label>
-                  <label style="display:flex;align-items:center;gap:5px;cursor:pointer;">
-                    <input type="checkbox" data-sample-test="t14" data-sample-id="${s.id}" ${s.t14?'checked':''}>
-                    Prueba 14 días${s.t14&&s.t14At?` (${fmtDateTime(s.t14At)})`:''}
-                  </label>
-                  <label style="display:flex;align-items:center;gap:5px;cursor:pointer;">
-                    <input type="checkbox" data-sample-test="t28" data-sample-id="${s.id}" ${s.t28?'checked':''}>
-                    Prueba 28 días${s.t28&&s.t28At?` (${fmtDateTime(s.t28At)})`:''}
-                  </label>
-                </div>` : ''}
+              ${s.collected ? `<div style="margin-top:7px;font-size:12.5px;">
+                ${SAMPLE_TESTS.map(t=>renderSampleTest(s,t)).join('')}
+              </div>` : ''}
             </div>
             <div style="display:flex;gap:6px;flex-wrap:wrap;">
               <button class="btn btn-sm btn-ghost" data-sample-toggle="${s.id}">${s.collected?'Marcar pendiente':'Marcar recolectada'}</button>
@@ -2827,42 +2844,54 @@
         <button class="btn btn-ghost btn-sm" id="addSampleBtn" style="margin-top:8px;">+ Agregar muestra</button>
       </div>`;
   }
+  /* Antes de un cambio en muestras: si no sabemos quién es, se le pregunta
+     una sola vez (y se recuerda). Devuelve el nombre o null si cancela. */
+  function requirePersonName(){
+    const current = currentPersonName();
+    if(current) return current;
+    openViewerPrompt();
+    alert('Primero elige quién eres en la lista, para dejar registrado quién hizo este cambio.');
+    return null;
+  }
   function bindOrderSamples(o){
+    const latest = ()=> (state.orders.find(x=>x.id===o.id) || o);
+    async function saveSamples(samples){
+      await patchDoc('orders', o.id, {samples});
+      renderOrderDetail({...latest(), samples});
+    }
     const addBtn = document.getElementById('addSampleBtn');
     if(addBtn) addBtn.onclick = async ()=>{
-      const samples = [...(o.samples||[]), {id:cryptoId(), collected:false, collectedAt:null, t7:false,t7At:null, t14:false,t14At:null, t28:false,t28At:null}];
-      await patchDoc('orders', o.id, {samples});
-      renderOrderDetail({...o, samples});
+      const prev = latest().samples||[];
+      await saveSamples([...prev, {id:cryptoId(), collected:false, collectedAt:null, t7:false,t7At:null, t14:false,t14At:null, t28:false,t28At:null}]);
     };
     document.querySelectorAll('[data-sample-toggle]').forEach(btn=>{
       btn.addEventListener('click', async ()=>{
+        const who = requirePersonName(); if(!who) return;
         const id = btn.dataset.sampleToggle;
-        const samples = (o.samples||[]).map(s=> s.id===id
-          ? {...s, collected: !s.collected, collectedAt: !s.collected ? new Date().toISOString() : s.collectedAt}
+        const samples = (latest().samples||[]).map(s=> s.id===id
+          ? (!s.collected
+              ? {...s, collected:true, collectedAt:new Date().toISOString(), collectedBy:who}
+              : {...s, collected:false})
           : s);
-        await patchDoc('orders', o.id, {samples});
-        renderOrderDetail({...o, samples});
+        await saveSamples(samples);
       });
     });
     document.querySelectorAll('[data-sample-remove]').forEach(btn=>{
       btn.addEventListener('click', async ()=>{
         const id = btn.dataset.sampleRemove;
         if(!confirm('¿Quitar esta muestra de la orden?')) return;
-        const samples = (o.samples||[]).filter(s=>s.id!==id);
-        await patchDoc('orders', o.id, {samples});
-        renderOrderDetail({...o, samples});
+        await saveSamples((latest().samples||[]).filter(s=>s.id!==id));
       });
     });
     document.querySelectorAll('[data-sample-test]').forEach(chk=>{
       chk.addEventListener('change', async ()=>{
+        const who = requirePersonName(); if(!who){ chk.checked = !chk.checked; return; }
         const id = chk.dataset.sampleId;
         const key = chk.dataset.sampleTest; // 't7' | 't14' | 't28'
-        const atKey = key+'At';
-        const samples = (o.samples||[]).map(s=> s.id===id
-          ? {...s, [key]: chk.checked, [atKey]: chk.checked ? new Date().toISOString() : null}
+        const samples = (latest().samples||[]).map(s=> s.id===id
+          ? {...s, [key]: chk.checked, [key+'At']: chk.checked ? new Date().toISOString() : null, [key+'By']: chk.checked ? who : null}
           : s);
-        await patchDoc('orders', o.id, {samples});
-        renderOrderDetail({...o, samples});
+        await saveSamples(samples);
       });
     });
   }
@@ -2942,7 +2971,12 @@
     const nowLocal = new Date(now.getTime()-now.getTimezoneOffset()*60000).toISOString().slice(0,16);
     modalForm.innerHTML = `
       <div class="field"><label for="f_person">¿Quién ${stage.verb}?</label>
-        <input id="f_person" type="text" required placeholder="Nombre de quien realiza este paso"></div>
+        <select id="f_person" required>
+          <option value="">Selecciona…</option>
+          ${TEAM_ROSTER.map(p=>`<option value="${esc(p.name)}" ${sameName(p.name, currentPersonName())?'selected':''}>${esc(p.name)} — ${esc(p.role)}</option>`).join('')}
+        </select>
+        ${currentPersonName() ? '' : '<div class="row-sub">Se recordará en este dispositivo para la próxima vez.</div>'}
+      </div>
       <div class="field"><label for="f_at">Fecha y hora</label>
         <input id="f_at" type="datetime-local" value="${nowLocal}"></div>
       <div class="field"><label for="f_note">Nota (opcional)</label>
@@ -2956,12 +2990,22 @@
     modalForm.onsubmit = async (e)=>{
       e.preventDefault();
       const person = document.getElementById('f_person').value;
+      if(!person) return;
+      /* Si en este dispositivo nadie había dicho quién es, se recuerda. */
+      if(!viewerName){ viewerName = person; writeJSON(VIEWER_KEY, viewerName); }
       const atLocal = document.getElementById('f_at').value;
       const note = document.getElementById('f_note').value;
       const at = atLocal ? new Date(atLocal).toISOString() : new Date().toISOString();
       const events = [...(o.events||[]), {stage:stage.key, person, at, note}];
-      await patchDoc('orders', o.id, {events, currentStage: stage.key});
-      pingOrder(o, 'La orden '+(o.folio||'')+' ('+(o.client||'')+') pasó a: '+stage.label);
+      let finalStage = stage.key;
+      /* Cuando laboratorio confirma que terminó, la orden pasa directo a
+         Gabinete sin que nadie tenga que darle otro clic. */
+      if(stage.key==='lista'){
+        events.push({stage:'gabinete', person, at, note:'Pasó automáticamente a gabinete al terminar laboratorio.'});
+        finalStage = 'gabinete';
+      }
+      await patchDoc('orders', o.id, {events, currentStage: finalStage});
+      pingOrder(o, 'La orden '+(o.folio||'')+' ('+(o.client||'')+') pasó a: '+stageLabel(finalStage));
       closeModal();
     };
     setTimeout(()=>{ const first = modalForm.querySelector('input,select,textarea'); if(first) first.focus(); },10);
