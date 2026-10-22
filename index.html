@@ -237,6 +237,9 @@
     padding:16px 18px;box-shadow:var(--shadow);
   }
   .stat-tile .label{font-size:12px;color:var(--ink-faint);text-transform:uppercase;letter-spacing:.06em;}
+  .att-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;margin-bottom:12px;}
+  .att-btn{justify-content:center;padding:14px 12px;font-size:14px;flex-direction:column;gap:4px;text-align:center;}
+  .att-emoji{font-size:22px;}
   .workload-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;}
   .workload-card{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:15px 18px;box-shadow:var(--shadow);}
   .workload-bar{background:var(--surface-2);border-radius:20px;height:8px;margin:9px 0 7px;overflow:hidden;}
@@ -512,16 +515,27 @@
     clients: '<svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 19c0-3.3 2.5-5.5 5.5-5.5s5.5 2.2 5.5 5.5"/><circle cx="17" cy="8.5" r="2.4"/><path d="M15.8 13.6c2.3.3 4 2.2 4 5.4"/></svg>',
     pricetag: '<svg viewBox="0 0 24 24"><path d="M11.5 4H5a1 1 0 0 0-1 1v6.5a1 1 0 0 0 .3.7l9 9a1 1 0 0 0 1.4 0l6.5-6.5a1 1 0 0 0 0-1.4l-9-9a1 1 0 0 0-.7-.3Z"/><circle cx="8.5" cy="8.5" r="1.4"/></svg>',
     trash: '<svg viewBox="0 0 24 24"><path d="M4.5 7h15"/><path d="M9 7V5a1.5 1.5 0 0 1 1.5-1.5h3A1.5 1.5 0 0 1 15 5v2"/><path d="M6.5 7l1 12.2A2 2 0 0 0 9.5 21h5a2 2 0 0 0 2-1.8L17.5 7"/><path d="M10 11v6M14 11v6"/></svg>',
+    clock: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>',
     workload: '<svg viewBox="0 0 24 24"><path d="M3.5 20.5h17"/><rect x="5.5" y="12.5" width="3.4" height="7.3" rx="0.8"/><rect x="10.3" y="7.5" width="3.4" height="12.3" rx="0.8"/><rect x="15.1" y="15" width="3.4" height="4.8" rx="0.8"/></svg>',
     expense: '<svg viewBox="0 0 24 24"><path d="M6 3h12v18l-2.5-1.6L13 21l-2.5-1.6L8 21l-2-1.6V3Z"/><path d="M9 8h6M9 12h6M9 16h3"/></svg>',
     finance: '<svg viewBox="0 0 24 24"><path d="M3.5 19.5h17"/><path d="M4.5 15.5 9 11l3.5 3L19.5 6.5"/><path d="M14.5 6.5h5v5"/></svg>'
   };
 
   /* ============ SCHEMAS ============ */
+  /* Estados de asistencia del personal (lo que se guarda es la etiqueta). */
+  const ATTENDANCE_STATUSES = [
+    {label:'Llegué',                   emoji:'🚪', color:'var(--accent)'},
+    {label:'En laboratorio',           emoji:'🧪', color:'var(--good)'},
+    {label:'En mi puesto de trabajo',  emoji:'💼', color:'var(--good)'},
+    {label:'En campo',                 emoji:'🚧', color:'var(--warn)'},
+    {label:'Salí',                     emoji:'🏁', color:'var(--ink-faint)'}
+  ];
+  const ATTENDANCE_OUT = 'Salí';
   const TABS = [
     {key:'dashboard', label:'Resumen', icon:'home'},
     {key:'finance',    label:'Finanzas', icon:'finance'},
     {key:'myAgenda',   label:'Mi agenda', icon:'calendar'},
+    {key:'attendance', label:'Asistencia', icon:'clock'},
     {key:'orders',     label:'Órdenes', icon:'orders'},
     {key:'workload',   label:'Carga de trabajo', icon:'workload'},
     {key:'clients',    label:'Clientes', icon:'clients'},
@@ -538,7 +552,7 @@
   /* Tabs visibles para cualquiera con el enlace (org). Todo lo demás sólo
      para quien puede editar el artefacto (dueño / administradores) —
      reforzado también del lado del servidor con las reglas de `db`. */
-  const PUBLIC_TABS = ['orders','myAgenda'];
+  const PUBLIC_TABS = ['orders','myAgenda','attendance'];
 
   const SCHEMAS = {
     clients:{
@@ -646,6 +660,7 @@
           'Otro'
         ],default:'Mecánica de suelos - privado'},
         {key:'assignedTo',label:'¿Quién la hará?',type:'teamSelect'},
+        {key:'scheduledDate',label:'Fecha en que se realizará el trabajo',type:'date'},
         {key:'priority',label:'Prioridad',type:'select',options:['Alta','Media','Baja'],default:'Media'},
         {key:'notes',label:'Notas',type:'textarea',placeholder:'Número de sondeos, profundidad, ensayos requeridos…'}
       ]
@@ -656,6 +671,15 @@
         {key:'service',label:'Servicio',type:'text',required:true,placeholder:'Mecánica de suelos - privado'},
         {key:'price',label:'Precio',type:'text',required:true,placeholder:'$13,000'},
         {key:'frequency',label:'Frecuencia / mínimo',type:'textarea',placeholder:'1 sondeo / 80 m de perímetro. Mínimo 2 sondeos de 3 m.'}
+      ]
+    },
+    attendance:{
+      title:'Registro de asistencia', titlePlural:'registros de asistencia',
+      fields:[
+        {key:'name',label:'Persona',type:'teamSelect',required:true},
+        {key:'status',label:'Estado',type:'select',options:ATTENDANCE_STATUSES.map(x=>x.label),default:'Llegué'},
+        {key:'date',label:'Fecha',type:'date',required:true},
+        {key:'time',label:'Hora',type:'time',required:true}
       ]
     },
     expenses:{
@@ -680,6 +704,7 @@
     {key:'analisis',     label:'En análisis',             verb:'realiza el análisis',            color:'var(--warn)',      pill:'pill-pendiente'},
     {key:'lista',        label:'Laboratorio terminó',     verb:'confirma que el laboratorio terminó',        color:'var(--good)',      pill:'pill-hecho'},
     {key:'gabinete',     label:'Gabinete',                verb:'la pasa a gabinete',              color:'var(--warn)',      pill:'pill-pendiente'},
+    {key:'porEntregar',  label:'Lista para entregar al cliente', verb:'la deja lista para entregar al cliente', color:'var(--good)', pill:'pill-hecho'},
     {key:'entregada',    label:'Entregada al cliente',    verb:'la entrega al cliente',          color:'var(--good)',      pill:'pill-hecho'}
   ];
   function stageInfo(key){ return ORDER_STAGES.find(s=>s.key===key) || ORDER_STAGES[0]; }
@@ -696,6 +721,43 @@
     const hasUncollected = (o.samples||[]).some(s=>!s.collected);
     const isConcrete = CONCRETE_SERVICE_REGEX.test(o.serviceType||'');
     return hasUncollected || isConcrete;
+  }
+  /* ---- Entregas parciales ----
+     Una orden puede traer pruebas distintas (7, 14 y 28 días). Cada muestra
+     lleva su plan de pruebas (s.tests); mientras falte alguna prueba
+     planeada, la orden sigue en Laboratorio aunque ya se haya entregado
+     (o esté en Gabinete / lista para entregar) lo de las primeras pruebas. */
+  const TEST_KEYS = [['t7',7,7,'7 días'],['t14',14,14,'14 días'],['t28',21,28,'21–28 días']];
+  function plannedTests(s){
+    const t = Array.isArray(s.tests) ? s.tests : ['t7','t14','t28'];
+    return TEST_KEYS.filter(k=>t.includes(k[0]));
+  }
+  function labPendingTests(o){
+    const labels = [];
+    (o.samples||[]).forEach(s=>{
+      plannedTests(s).forEach(k=>{ if(!s[k[0]] && !labels.includes(k[3])) labels.push(k[3]); });
+    });
+    return labels;
+  }
+  /* Pruebas terminadas que todavía no se han entregado al cliente: son las
+     que lleva la entrega actual (se marcan como entregadas al pasar a Entregada). */
+  function toDeliverTests(o){
+    const labels = [];
+    (o.samples||[]).forEach(s=>{
+      plannedTests(s).forEach(k=>{ if(s[k[0]] && !s[k[0]+'Del'] && !labels.includes(k[3])) labels.push(k[3]); });
+    });
+    return labels;
+  }
+  function deliverText(o){
+    const t = toDeliverTests(o);
+    return t.length ? 'Entrega: '+t.map(x=>'prueba de '+x).join(', ') : '';
+  }
+  const POST_LAB_STAGES = ['lista','gabinete','porEntregar','entregada'];
+  function labPending(o){
+    return POST_LAB_STAGES.includes(o.currentStage) && labPendingTests(o).length>0;
+  }
+  function joinLabels(arr){
+    return arr.length>1 ? arr.slice(0,-1).join(', ')+' y '+arr[arr.length-1] : (arr[0]||'');
   }
   function daysSinceISO(iso){
     if(!iso) return 0;
@@ -916,6 +978,7 @@
     return {
       priceList: REAL_PRICE_LIST,
       expenses:[],
+      attendance:[],
       clients:[
         {name:'Desarrolladora Cumbres', contact:'Ing. Paola Serrano', phone:'55 2234 1190', email:'paola.serrano@cumbres.mx', address:'Torre Norte, Etapa 2', notes:'Solicita informes en PDF y físico.'},
         {name:'Constructora Nova', contact:'Arq. Beatriz León', phone:'55 4310 8827', email:'beatriz.leon@nova.com.mx', address:'Nave industrial Km 12', notes:'Paga por transferencia a 15 días.'},
@@ -1192,8 +1255,9 @@
     unsubs.push(unsub);
   }
   function pingOrder(order, message){
-    if(!order || !order.assignedTo) return;
-    sendSignal({kind:'orderPing', orderId:order.id, folio:order.folio, client:order.client, assignedTo:order.assignedTo, message});
+    const target = orderOwner(order);
+    if(!order || !target) return;
+    sendSignal({kind:'orderPing', orderId:order.id, folio:order.folio, client:order.client, assignedTo:target, message});
   }
 
   /* ============ LOGIN AL PANEL INTERNO ============ */
@@ -1279,23 +1343,38 @@
     const btn = document.getElementById('viewerChangeBtn');
     if(btn) btn.onclick = openViewerPrompt;
   }
-  function openViewerPrompt(){
+  /* Al abrir la página siempre se pregunta quién eres, antes de cualquier
+     otra cosa (modo "obligatorio": sin X, sin Escape, sin omitir). Desde el
+     link de la barra lateral se puede abrir también para cambiar de persona. */
+  let viewerRequired = false;
+  function openViewerPrompt(required){
+    viewerRequired = required===true; // ojo: onclick manda el evento, no true
     document.getElementById('viewerOverlay').hidden = false;
+    document.getElementById('viewerModalClose').hidden = viewerRequired;
     renderViewerForm();
   }
-  function closeViewerPrompt(){ document.getElementById('viewerOverlay').hidden = true; }
+  function closeViewerPrompt(){
+    if(viewerRequired) return;
+    document.getElementById('viewerOverlay').hidden = true;
+  }
   function setViewerName(name){
+    const wasRequired = viewerRequired;
     viewerName = name;
     writeJSON(VIEWER_KEY, viewerName);
+    viewerRequired = false;
     closeViewerPrompt();
+    /* Quien no es del panel interno cae directo en Asistencia para marcar
+       su entrada; el panel interno sigue donde estaba. */
+    if(wasRequired && name && !isAdmin) currentTab = 'attendance';
     renderAll();
   }
   function renderViewerForm(){
     const names = authState.names || [];
+    const preset = viewerName || (session && session.name) || '';
     const body = document.getElementById('viewerModalBody');
     body.innerHTML = `
       <p class="row-sub" style="margin-bottom:14px;">
-        Esto es solo para mostrarte tus órdenes pendientes aquí — no es la contraseña
+        ${viewerRequired ? '<strong>Antes de empezar, dinos quién eres.</strong> ' : ''}Sirve para mostrarte tus pendientes y registrar tu asistencia — no es la contraseña
         del panel interno ni cambia lo que puedes ver o hacer en la página.
       </p>
       <form id="viewerForm" style="display:flex;flex-direction:column;gap:14px;">
@@ -1303,24 +1382,25 @@
           <label for="viewer_name">¿Quién eres?</label>
           <select id="viewer_name">
             <option value="">Selecciona tu nombre…</option>
-            ${names.map(n=>`<option value="${esc(n)}" ${n===viewerName?'selected':''}>${esc(n)}</option>`).join('')}
-            <option value="__other__" ${viewerName && !names.includes(viewerName)?'selected':''}>Otro…</option>
+            ${names.map(n=>`<option value="${esc(n)}" ${n===preset?'selected':''}>${esc(n)}</option>`).join('')}
+            <option value="__other__" ${preset && !names.includes(preset)?'selected':''}>Otro…</option>
           </select>
         </div>
         <div class="field" id="viewer_other_wrap" hidden>
           <label for="viewer_other">Escribe tu nombre</label>
-          <input id="viewer_other" type="text" placeholder="Tu nombre completo" value="${viewerName && !names.includes(viewerName)?esc(viewerName):''}">
+          <input id="viewer_other" type="text" placeholder="Tu nombre completo" value="${preset && !names.includes(preset)?esc(preset):''}">
         </div>
         <div class="modal-actions">
-          <button type="button" class="btn btn-ghost" id="viewerSkipBtn">Omitir por ahora</button>
-          <button type="submit" class="btn btn-accent">Guardar</button>
+          ${viewerRequired ? '' : '<button type="button" class="btn btn-ghost" id="viewerSkipBtn">Omitir por ahora</button>'}
+          <button type="submit" class="btn btn-accent">${viewerRequired ? 'Continuar' : 'Guardar'}</button>
         </div>
       </form>`;
     const sel = document.getElementById('viewer_name');
     const otherWrap = document.getElementById('viewer_other_wrap');
     otherWrap.hidden = sel.value !== '__other__';
     sel.addEventListener('change', ()=>{ otherWrap.hidden = sel.value !== '__other__'; });
-    document.getElementById('viewerSkipBtn').addEventListener('click', ()=> setViewerName(''));
+    const skipBtn = document.getElementById('viewerSkipBtn');
+    if(skipBtn) skipBtn.addEventListener('click', ()=> setViewerName(''));
     document.getElementById('viewerForm').addEventListener('submit', (e)=>{
       e.preventDefault();
       let name = sel.value;
@@ -1539,7 +1619,8 @@
     const priv = TABS.filter(t=>!PUBLIC_TABS.includes(t.key));
     function tabBtn(t){
       let right = '';
-      if(t.key==='access') right = `<span class="count">${accessLogEntries.length}</span>`;
+      if(t.key==='attendance') right = isAdmin ? (()=>{ const n=attendanceBoard().filter(r=>r.here).length; return n?`<span class="count">${n}</span>`:''; })() : '';
+      else if(t.key==='access') right = `<span class="count">${accessLogEntries.length}</span>`;
       else if(t.key==='myAgenda') right = myAgendaCount() ? `<span class="count">${myAgendaCount()}</span>` : '';
       else if(t.key==='trash') right = trashEntries.length ? `<span class="count">${trashEntries.length}</span>` : '';
       else if(t.key==='workload') right = '';
@@ -1607,6 +1688,9 @@
     } else if(currentTab==='trash'){
       subEl.textContent = trashEntries.length + (trashEntries.length===1?' elemento eliminado':' elementos eliminados');
       addBtn.hidden = true;
+    } else if(currentTab==='attendance'){
+      subEl.textContent = new Date().toLocaleDateString('es-MX',{weekday:'long',day:'numeric',month:'long'});
+      addBtn.hidden = true;
     } else if(currentTab==='workload'){
       subEl.textContent = 'Órdenes abiertas por persona';
       addBtn.hidden = true;
@@ -1637,6 +1721,7 @@
     else if(currentTab==='myAgenda'){ c.innerHTML = renderMyAgenda(); bindMyAgenda(); }
     else if(currentTab==='access'){ c.innerHTML = renderAccessLog(); bindAccessLogActions(); }
     else if(currentTab==='trash'){ c.innerHTML = renderTrash(); bindTrashActions(); }
+    else if(currentTab==='attendance'){ c.innerHTML = renderAttendance(); bindAttendance(); }
     else if(currentTab==='workload'){ c.innerHTML = renderWorkload(); }
     else if(currentTab==='finance'){ c.innerHTML = renderFinance(); bindFinance(); }
     else if(currentTab==='receivables'){ c.innerHTML = renderOrderCobrosPanel() + renderTable(currentTab); }
@@ -1672,8 +1757,8 @@
     const upcomingAppts = state.appointments.filter(a=>!a.date || a.date>=TODAY).sort((a,b)=>((a.date||'')+((a.time)||'')).localeCompare((b.date||'')+(b.time||'')));
     const nextAppt = upcomingAppts[0];
     const upcomingPayroll = [...state.employees].sort((a,b)=>(a.payday||'9999').localeCompare(b.payday||'9999'))[0];
-    const activeOrders = state.orders.filter(o=>o.currentStage!=='entregada');
-    const readyOrders = state.orders.filter(o=>o.currentStage==='gabinete' || o.currentStage==='lista');
+    const activeOrders = state.orders.filter(o=>o.currentStage!=='entregada' || labPending(o));
+    const readyOrders = state.orders.filter(o=>o.currentStage==='porEntregar');
 
     const tiles = [
       {label:'Órdenes activas', value:activeOrders.length, foot: readyOrders.length? readyOrders.length+' lista(s) para entregar' : (state.orders.length? 'en proceso':'sin órdenes'), cls: readyOrders.length?'warn':''},
@@ -1686,12 +1771,14 @@
 
     const attn = [];
     readyOrders.forEach(o=>attn.push({swatch:'accent',tag:'Orden',title:o.folio+' · '+o.client,meta:'lista para entregar'}));
+    activeOrders.filter(o=>o.scheduledDate && (o.scheduledDate===TODAY || o.scheduledDate===addDays(1)) && ['girada','aceptada','campo'].includes(o.currentStage)).forEach(o=>attn.push({swatch:'accent',tag:'Trabajo',title:o.folio+' · '+o.client+(orderOwner(o)?' · '+orderOwner(o):''),meta:'se realiza '+relDay(o.scheduledDate)}));
+    state.orders.filter(labPending).forEach(o=>attn.push({swatch:'accent',tag:'Lab',title:o.folio+' · '+o.client,meta:'sigue en laboratorio · faltan pruebas de '+joinLabels(labPendingTests(o))}));
     state.orders.filter(needsSampleCollection).forEach(o=>{
       const isConcrete = CONCRETE_SERVICE_REGEX.test(o.serviceType||'');
       const pending = (o.samples||[]).filter(s=>!s.collected).length;
       attn.push({swatch:'warn',tag:'Muestra',title:o.folio+' · '+o.client+(isConcrete?' · 🧱 Concreto':''),meta: pending>0 ? pending+' muestra'+(pending===1?'':'s')+' por recolectar' : 'registrar y recolectar muestra(s)'});
     });
-    activeOrders.filter(o=>o.currentStage!=='gabinete' && o.currentStage!=='lista').forEach(o=>{
+    activeOrders.filter(o=>o.currentStage!=='porEntregar' && o.currentStage!=='entregada').forEach(o=>{
       const last = (o.events||[]).slice(-1)[0];
       if(last){
         const d = daysSinceISO(last.at);
@@ -1933,6 +2020,7 @@
     if(col==='deliveries') return {title: doc.order||'(sin pedido)', sub: doc.client||''};
     if(col==='appointments') return {title: doc.title||'(sin motivo)', sub: [doc.date,doc.assignedTo].filter(Boolean).join(' · ')};
     if(col==='priceList') return {title: doc.service||'', sub: doc.price||''};
+    if(col==='attendance') return {title: (doc.name||'(sin nombre)')+' · '+(doc.status||''), sub: [doc.date?fmtDate(doc.date):'', doc.time].filter(Boolean).join(' ')};
     if(col==='expenses') return {title: doc.concept||'(sin concepto)', sub: [doc.category, doc.date?fmtDate(doc.date):''].filter(Boolean).join(' · ')};
     return {title: doc.id, sub:''};
   }
@@ -2046,10 +2134,10 @@
   }
   /* --- Órdenes --- */
   function exportOrdersCSV(){
-    const headers = ['Folio','Cliente','Proyecto','Servicio','Encargado','Etapa','Prioridad','Costo','Anticipo','Saldo','Notas'];
+    const headers = ['Folio','Cliente','Proyecto','Servicio','Encargado','Fecha del trabajo','Etapa','Prioridad','Costo','Anticipo','Saldo','Notas'];
     const rows = state.orders.map(o=>{
       const costo = Number(o.costo)||0, anticipo = Number(o.anticipo)||0;
-      return [o.folio, o.client, o.project||'', o.serviceType||'', o.assignedTo||'', stageLabel(o.currentStage), o.priority||'', costo, anticipo, costo-anticipo, o.notes||''];
+      return [o.folio, o.client, o.project||'', o.serviceType||'', orderOwner(o), o.scheduledDate||'', stageLabel(o.currentStage), o.priority||'', costo, anticipo, costo-anticipo, o.notes||''];
     });
     downloadCSV('ordenes_'+TODAY+'.csv', headers, rows);
   }
@@ -2059,11 +2147,11 @@
       return {o, costo, anticipo, saldo:costo-anticipo};
     });
     const body = `<table><thead><tr>
-      <th>Folio</th><th>Cliente</th><th>Proyecto</th><th>Servicio</th><th>Encargado</th><th>Etapa</th><th>Prioridad</th>
+      <th>Folio</th><th>Cliente</th><th>Proyecto</th><th>Servicio</th><th>Encargado</th><th>Fecha trabajo</th><th>Etapa</th><th>Prioridad</th>
       <th class="num">Costo</th><th class="num">Anticipo</th><th class="num">Saldo</th>
       </tr></thead><tbody>${rows.map(r=>`<tr>
         <td>${esc(r.o.folio)}</td><td>${esc(r.o.client)}</td><td>${esc(r.o.project||'')}</td>
-        <td>${esc(r.o.serviceType||'')}</td><td>${esc(r.o.assignedTo||'')}</td><td>${esc(stageLabel(r.o.currentStage))}</td>
+        <td>${esc(r.o.serviceType||'')}</td><td>${esc(orderOwner(r.o))}</td><td>${esc(r.o.scheduledDate?fmtDate(r.o.scheduledDate):'')}</td><td>${esc(stageLabel(r.o.currentStage))}</td>
         <td>${esc(r.o.priority||'')}</td><td class="num">${r.costo?money(r.costo):''}</td>
         <td class="num">${r.costo?money(r.anticipo):''}</td><td class="num">${r.costo?money(r.saldo):''}</td>
       </tr>`).join('')}</tbody></table>`;
@@ -2252,11 +2340,24 @@
     {label:'Aceptada',             color: stageInfo('aceptada').color,     stages:['aceptada']},
     {label:'Trabajo de campo',     color: stageInfo('campo').color,        stages:['campo']},
     {label:'Laboratorio',          color: stageInfo('laboratorio').color,  stages:['laboratorio','analisis']},
-    {label:'Gabinete',             color: stageInfo('gabinete').color,     stages:['lista','gabinete']},
+    {label:'Gabinete (Regina Contreras)', color: stageInfo('gabinete').color, stages:['lista','gabinete']},
+    {label:'Lista para entregar al cliente', color: stageInfo('porEntregar').color, stages:['porEntregar']},
     {label:'Entregada al cliente', color: stageInfo('entregada').color,    stages:['entregada']}
   ];
-  function isMine(o){
+  /* Gabinete es trabajo de Regina Contreras Ruiz: mientras una orden está
+     en Gabinete, aparece a su nombre (en lugar de quien la hizo en campo o
+     laboratorio) y le sale en su agenda y en su carga de trabajo. */
+  const GABINETE_OWNER = 'Regina Contreras Ruiz';
+  function orderOwner(o){
+    return (o.currentStage==='gabinete' || o.currentStage==='lista') ? GABINETE_OWNER : (o.assignedTo||'');
+  }
+  /* ¿La tengo asignada yo (quien la hace en campo/laboratorio)? Para muestras y pruebas. */
+  function isAssigned(o){
     return !!(viewerName && o.assignedTo && o.assignedTo.trim().toLowerCase()===viewerName.trim().toLowerCase());
+  }
+  function isMine(o){
+    const owner = orderOwner(o);
+    return !!(viewerName && owner && owner.trim().toLowerCase()===viewerName.trim().toLowerCase());
   }
 
   /* ============ MI AGENDA (para todo el que no entra al Panel interno) ============
@@ -2279,7 +2380,7 @@
   }
   function myPendingOrders(){
     return state.orders
-      .filter(o=>isMine(o) && o.currentStage!=='entregada')
+      .filter(o=>isMine(o) && (o.currentStage!=='entregada' || labPending(o)))
       .map(o=>{
         const last = (o.events||[]).slice(-1)[0];
         const days = last ? daysSinceISO(last.at) : 0;
@@ -2289,11 +2390,11 @@
   }
   function mySampleTestsDue(){
     const items = [];
-    state.orders.filter(isMine).forEach(o=>{
+    state.orders.filter(isAssigned).forEach(o=>{
       (o.samples||[]).forEach((s,i)=>{
         if(!s.collected || !s.collectedAt) return;
         /* [clave, día en que ya se puede hacer, día límite, etiqueta] */
-        [['t7',7,7,'7 días'],['t14',14,14,'14 días'],['t28',21,28,'21–28 días']].forEach(([key,from,to,label])=>{
+        plannedTests(s).forEach(([key,from,to,label])=>{
           if(s[key]) return; // ya hecha
           const due = isoPlusDays(s.collectedAt, from);
           const dueBy = isoPlusDays(s.collectedAt, to);
@@ -2313,7 +2414,7 @@
      recolección casi siempre pasa después del trabajo de campo mismo). */
   function mySamplesToCollect(){
     return state.orders
-      .filter(o=> isMine(o) && needsSampleCollection(o))
+      .filter(o=> isAssigned(o) && needsSampleCollection(o))
       .map(o=>({
         o,
         pending: (o.samples||[]).filter(s=>!s.collected).length,
@@ -2378,7 +2479,7 @@
         <span class="swatch ${days>=STALL_DAYS?'danger':'accent'}"></span>
         <span class="tag">Orden</span>
         <span class="title">${esc(o.folio)} · ${esc(o.client)}</span>
-        <span class="meta">${stageLabel(o.currentStage)}${days? ' · sin avance hace '+days+' día'+(days===1?'':'s') : ''}</span>
+        <span class="meta">${stageLabel(o.currentStage)}${o.scheduledDate?' · 📅 '+(o.scheduledDate===TODAY?'hoy':fmtDate(o.scheduledDate)):''}${days? ' · sin avance hace '+days+' día'+(days===1?'':'s') : ''}</span>
       </div>`).join('')}
     </div>` : '';
     const toCollectHtml = toCollect.length ? `<div class="panel">
@@ -2457,7 +2558,7 @@
         ⏳ ${ordersPending} ${ordersPending===1?'cambio de órdenes':'cambios de órdenes'} sin confirmar en la nube todavía
         — se ve aquí en este dispositivo, pero puede no haberle llegado aún a tu equipo.
       </div>` : '';
-    const mineCount = state.orders.filter(o=>isMine(o) && o.currentStage!=='entregada').length;
+    const mineCount = state.orders.filter(o=>isMine(o) && (o.currentStage!=='entregada' || labPending(o))).length;
     const filterBar = viewerName ? `
       <div class="order-filter-bar">
         <button class="btn btn-sm ${!ordersFilterMine?'btn-accent':'btn-ghost'}" data-orderfilter="all">Todas</button>
@@ -2467,7 +2568,7 @@
       </div>` : '';
     const sections = ORDER_GROUPS.map(g=>({
       group:g,
-      items: state.orders.filter(o=>g.stages.includes(o.currentStage))
+      items: state.orders.filter(o=>g.stages.includes(o.currentStage) || (g.stages.includes('laboratorio') && labPending(o)))
         .filter(o=> !ordersFilterMine || isMine(o))
         .sort((a,b)=>{
           const la = (a.events||[]).slice(-1)[0]; const lb = (b.events||[]).slice(-1)[0];
@@ -2487,20 +2588,27 @@
           <span class="badge-count">${sec.items.length}</span>
         </div>
         ${sec.items.length
-          ? sec.items.map(o=>orderRowHtml(o, sec.group.stages.length>1)).join('')
+          ? sec.items.map(o=>orderRowHtml(o, sec.group.stages.length>1, sec.group.stages.includes('laboratorio'))).join('')
           : `<div class="empty-state" style="padding:20px"><p>Sin órdenes en esta etapa.</p></div>`}
       </div>
     `).join('');
   }
-  function orderRowHtml(o, showStageTag){
+  function orderRowHtml(o, showStageTag, inLabGroup){
     const last = (o.events||[]).slice(-1)[0];
     const costo = Number(o.costo)||0;
     const saldo = costo - (Number(o.anticipo)||0);
     const stalledDays = last ? daysSinceISO(last.at) : 0;
-    const isStalled = o.currentStage!=='entregada' && stalledDays>=STALL_DAYS;
+    const isStalled = o.currentStage!=='entregada' && !labPending(o) && stalledDays>=STALL_DAYS;
     const subBits = [];
-    if(showStageTag) subBits.push('🔬 '+esc(stageLabel(o.currentStage)));
-    if(o.assignedTo) subBits.push((isMine(o)?'⭐ ':'👷 ')+esc(o.assignedTo));
+    if(labPending(o)){
+      const faltan = joinLabels(labPendingTests(o));
+      if(inLabGroup) subBits.push(`<span style="color:var(--accent);font-weight:600;">${o.currentStage==='entregada'?'📦 ya entregado':'📦 va en '+esc(stageLabel(o.currentStage))} · 🔬 faltan pruebas de ${esc(faltan)}</span>`);
+      else if(o.currentStage==='entregada') subBits.push(`<span style="color:var(--accent);font-weight:600;">📦 entrega parcial — sigue en laboratorio: faltan ${esc(faltan)}</span>`);
+      else subBits.push(`<span style="color:var(--accent);font-weight:600;">🔬 sigue en laboratorio: faltan ${esc(faltan)}</span>`);
+    } else if(showStageTag) subBits.push('🔬 '+esc(stageLabel(o.currentStage)));
+    if(['lista','gabinete','porEntregar'].includes(o.currentStage) && deliverText(o)) subBits.push(`<span style="color:var(--good);font-weight:600;">📄 ${esc(deliverText(o))}</span>`);
+    if(orderOwner(o)) subBits.push((isMine(o)?'⭐ ':'👷 ')+esc(orderOwner(o)));
+    if(o.scheduledDate) subBits.push('📅 trabajo: '+(o.scheduledDate===TODAY?'<strong>hoy</strong>':fmtDate(o.scheduledDate)));
     if(last) subBits.push(esc(last.person)+' · '+relDay(last.at.slice(0,10)));
     if(isStalled) subBits.push(`<span style="color:var(--warn);font-weight:600;">⚠ sin avance hace ${stalledDays} días</span>`);
     if(needsSampleCollection(o)) subBits.push(`<span style="color:var(--warn);font-weight:600;">🧺 recolectar muestra${CONCRETE_SERVICE_REGEX.test(o.serviceType||'')?' · 🧱 Concreto':''}</span>`);
@@ -2530,11 +2638,124 @@
     });
   }
 
+  /* ============ ASISTENCIA DEL PERSONAL ============
+     Cada quien marca dónde está (llegué / laboratorio / mi puesto / campo /
+     salí). Cada persona ve solo lo suyo; el tablero con todo el equipo y el
+     historial son del panel interno. Cada marca es un registro con fecha y
+     hora, así queda el historial de entradas y salidas. */
+  function nowHHMM(){ return new Date().toTimeString().slice(0,5); }
+  function attendanceStatusInfo(label){ return ATTENDANCE_STATUSES.find(x=>x.label===label) || {label:label||'—', emoji:'•', color:'var(--ink-faint)'}; }
+  function attendanceRecordsFor(name, date){
+    return (state.attendance||[])
+      .filter(r=> sameName(r.name, name) && r.date===date)
+      .sort((a,b)=> ((a.time||'')+(a.ts||'')).localeCompare((b.time||'')+(b.ts||'')));
+  }
+  function currentAttendance(name){
+    const recs = attendanceRecordsFor(name, TODAY);
+    return recs.length ? recs[recs.length-1] : null;
+  }
+  function attendanceBoard(){
+    const names = [...TEAM_ROSTER.map(p=>p.name)];
+    (state.attendance||[]).forEach(r=>{ if(r.date===TODAY && r.name && !names.some(n=>sameName(n,r.name))) names.push(r.name); });
+    return names.map(name=>{
+      const cur = currentAttendance(name);
+      const first = attendanceRecordsFor(name, TODAY).find(r=>r.status!==ATTENDANCE_OUT);
+      return {name, cur, first, here: !!(cur && cur.status!==ATTENDANCE_OUT)};
+    });
+  }
+  async function markAttendance(status){
+    const name = currentPersonName();
+    if(!name){ openViewerPrompt(true); return; }
+    await saveDoc('attendance', null, {name, status, date:TODAY, time:nowHHMM(), ts:new Date().toISOString()});
+  }
+  function renderAttendance(){
+    const name = currentPersonName();
+    if(!name){
+      return `<div class="panel"><div class="empty-state"><div class="glyph">👋</div>
+        <p>Dinos quién eres para registrar tu entrada y salida.</p>
+        <button class="btn btn-accent" id="attSetNameBtn">Decir quién eres</button></div></div>`;
+    }
+    const cur = currentAttendance(name);
+    const info = cur ? attendanceStatusInfo(cur.status) : null;
+    const mine = attendanceRecordsFor(name, TODAY);
+    const mineHtml = `<div class="panel">
+      <div class="panel-head"><h3>Hola, ${esc(name)}</h3></div>
+      <div style="padding:14px 18px 6px;">
+        ${cur
+          ? `<div style="font-size:15px;margin-bottom:4px;">${info.emoji} <strong>${esc(cur.status)}</strong> <span class="row-sub" style="display:inline;">desde las ${esc(cur.time||'')}</span></div>`
+          : `<div style="font-size:15px;margin-bottom:4px;">⏳ Todavía no registras tu entrada de hoy.</div>`}
+        <div class="row-sub" style="margin-bottom:12px;">Toca el botón que diga dónde estás ahora.</div>
+        <div class="att-grid">
+          ${ATTENDANCE_STATUSES.map(st=>`<button class="btn att-btn ${cur&&cur.status===st.label?'btn-accent':'btn-ghost'}" data-att-status="${esc(st.label)}">
+            <span class="att-emoji">${st.emoji}</span>${esc(st.label)}</button>`).join('')}
+        </div>
+      </div>
+      ${mine.length ? `<div style="padding:6px 18px 14px;">
+        <div class="row-sub" style="margin:8px 0 4px;font-weight:600;">Tus marcas de hoy</div>
+        ${mine.map(r=>`<div class="row-sub">${attendanceStatusInfo(r.status).emoji} ${esc(r.time||'')} · ${esc(r.status)}</div>`).join('')}
+      </div>` : ''}
+    </div>`;
+    if(!isAdmin) return mineHtml;
+
+    const board = attendanceBoard();
+    const hereN = board.filter(r=>r.here).length;
+    const outN = board.filter(r=>r.cur && !r.here).length;
+    const noneN = board.filter(r=>!r.cur).length;
+    const labN = board.filter(r=>r.cur && r.cur.status==='En laboratorio').length;
+    const boardHtml = `
+      <div class="stat-grid">
+        <div class="stat-tile"><div class="label">En la empresa</div><div class="value">${hereN}</div><div class="foot">de ${board.length} personas</div></div>
+        <div class="stat-tile"><div class="label">En laboratorio</div><div class="value">${labN}</div><div class="foot">ahora mismo</div></div>
+        <div class="stat-tile"><div class="label">Ya salieron</div><div class="value">${outN}</div><div class="foot">hoy</div></div>
+        <div class="stat-tile"><div class="label">Sin registro</div><div class="value ${noneN?'warn':''}">${noneN}</div><div class="foot">hoy</div></div>
+      </div>
+      <div class="panel">
+        <div class="panel-head"><h3>Equipo hoy</h3></div>
+        ${board.map(r=>{
+          const si = r.cur ? attendanceStatusInfo(r.cur.status) : null;
+          return `<div class="attn-row">
+            <span class="swatch ${!r.cur?'warn':(r.here?'accent':'')}"></span>
+            <span class="title">${esc(r.name)}</span>
+            <span class="meta">${r.cur ? si.emoji+' '+esc(r.cur.status)+' · '+esc(r.cur.time||'')+(r.first?' (llegó '+esc(r.first.time||'')+')':'') : 'Sin registro hoy'}</span>
+          </div>`;
+        }).join('')}
+      </div>`;
+    const hist = [...(state.attendance||[])]
+      .sort((a,b)=> ((b.date||'')+(b.time||'')+(b.ts||'')).localeCompare((a.date||'')+(a.time||'')+(a.ts||'')))
+      .slice(0,60);
+    const histHtml = `<div class="panel">
+      <div class="panel-head"><h3>Historial de entradas y salidas</h3>
+        <button class="btn btn-sm btn-ghost" id="attAddBtn">+ Agregar registro</button></div>
+      ${hist.length ? `<div class="table-wrap"><table>
+        <thead><tr><th>Persona</th><th>Estado</th><th>Fecha</th><th>Hora</th><th></th></tr></thead>
+        <tbody>${hist.map(r=>`<tr data-id="${r.id}">
+          <td class="row-title">${esc(r.name)}</td>
+          <td>${attendanceStatusInfo(r.status).emoji} ${esc(r.status)}</td>
+          <td>${r.date?fmtDate(r.date):'—'}</td>
+          <td class="num">${esc(r.time||'')}</td>
+          <td class="row-actions">
+            <button class="btn btn-sm btn-ghost" data-act="edit" data-col="attendance">Editar</button>
+            <button class="btn btn-sm btn-danger-text" data-act="delete" data-col="attendance">Eliminar</button>
+          </td></tr>`).join('')}</tbody></table></div>`
+        : `<div class="empty-state" style="padding:22px"><p>Aún no hay registros.</p></div>`}
+    </div>`;
+    return mineHtml + boardHtml + histHtml;
+  }
+  function bindAttendance(){
+    document.querySelectorAll('[data-att-status]').forEach(btn=>{
+      btn.addEventListener('click', ()=> markAttendance(btn.dataset.attStatus));
+    });
+    const setBtn = document.getElementById('attSetNameBtn');
+    if(setBtn) setBtn.onclick = ()=>openViewerPrompt(false);
+    const addBtn = document.getElementById('attAddBtn');
+    if(addBtn) addBtn.onclick = ()=>openModal('attendance', null);
+  }
+
   /* ============ CARGA DE TRABAJO (panel interno) ============
      Cuántas órdenes abiertas (sin entregar) tiene cada quien, para repartir
      mejor — se basa en el mismo organigrama (TEAM_ROSTER) y en o.assignedTo. */
   function renderWorkload(){
-    const openOrders = (state.orders||[]).filter(o=>o.currentStage!=='entregada');
+    const openOrders = (state.orders||[]).filter(o=>o.currentStage!=='entregada' || labPending(o));
     if(!openOrders.length){
       return `<div class="panel"><div class="empty-state">
         <div class="glyph">👷</div>
@@ -2545,7 +2766,7 @@
     TEAM_ROSTER.forEach(p=>{ byPerson[p.name] = []; });
     const unassigned = [];
     openOrders.forEach(o=>{
-      const name = (o.assignedTo||'').trim();
+      const name = orderOwner(o).trim();
       if(!name){ unassigned.push(o); return; }
       if(!byPerson[name]) byPerson[name] = [];
       byPerson[name].push(o);
@@ -2744,7 +2965,8 @@
       <div class="order-meta">
         <div class="row-title" style="font-size:15px">${esc(o.client)}${o.project?' · '+esc(o.project):''}</div>
         <div class="row-sub">${esc(o.serviceType)||''}</div>
-        ${o.assignedTo?`<div class="row-sub">👷 La hará: ${esc(o.assignedTo)}</div>`:''}
+        ${orderOwner(o)?`<div class="row-sub">👷 ${(o.currentStage==='gabinete'||o.currentStage==='lista')?'Gabinete a cargo de':'La hará'}: ${esc(orderOwner(o))}</div>`:''}
+        ${o.scheduledDate?`<div class="row-sub">📅 Trabajo programado: ${fmtDate(o.scheduledDate)}${o.scheduledDate===TODAY?' (hoy)':''}</div>`:''}
         <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
           <span class="pill ${stageInfo(o.currentStage).pill}">${stageLabel(o.currentStage)}</span>
           ${o.priority?`<span class="pill ${statusClass(o.priority)}">${esc(o.priority)}</span>`:''}
@@ -2765,8 +2987,13 @@
       </div>
       ${next
         ? `<button class="btn btn-accent" id="advanceOrderBtn" style="width:100%;justify-content:center;margin-top:14px">${next.key==='lista' ? '✅ Laboratorio terminó → pasar a Gabinete' : 'Registrar: '+next.label}</button>`
-        : `<div class="empty-state" style="padding:14px 0 0"><p>Ciclo completo — orden entregada al cliente.</p></div>`
+        : (labPending(o)
+          ? `<div class="empty-state" style="padding:14px 0 0"><p>📦 Entrega parcial hecha. La orden sigue en <strong>Laboratorio</strong>: faltan pruebas de ${esc(joinLabels(labPendingTests(o)))}.</p></div>
+             <button class="btn btn-accent" id="nextDeliveryBtn" style="width:100%;justify-content:center;margin-top:10px">📦 Iniciar siguiente entrega (pasar a Gabinete)</button>`
+          : `<div class="empty-state" style="padding:14px 0 0"><p>Ciclo completo — orden entregada al cliente.</p></div>`)
       }
+      ${(['lista','gabinete','porEntregar'].includes(o.currentStage) && deliverText(o)) ? `<div class="row-sub" style="margin-top:8px;color:var(--good);font-weight:600;">📄 ${esc(deliverText(o))}</div>` : ''}
+      ${(labPending(o) && next) ? `<div class="row-sub" style="margin-top:8px;">🔬 Sigue también en Laboratorio: faltan pruebas de ${esc(joinLabels(labPendingTests(o)))}.</div>` : ''}
       ${renderOrderSamples(o)}
       ${isAdmin ? renderOrderFinance(o) : ''}
       <div class="modal-actions" style="margin-top:14px">
@@ -2775,6 +3002,15 @@
       </div>
     `;
     if(next) document.getElementById('advanceOrderBtn').onclick = ()=>openAdvanceForm(o, next);
+    const ndb = document.getElementById('nextDeliveryBtn');
+    if(ndb) ndb.onclick = async ()=>{
+      const who = requirePersonName(); if(!who) return;
+      const faltan = joinLabels(labPendingTests(o));
+      if(!confirm('¿Iniciar una nueva entrega con las pruebas terminadas? La orden regresa a Gabinete y sigue en Laboratorio por: '+faltan+'.')) return;
+      const events = [...(o.events||[]), {stage:'gabinete', person:who, at:new Date().toISOString(), note:'Nueva entrega parcial · aún faltan pruebas de '+faltan}];
+      await patchDoc('orders', o.id, {currentStage:'gabinete', events});
+      closeOrderModal();
+    };
     document.getElementById('editOrderBasicBtn').onclick = ()=>{ closeOrderModal(); openOrderEditModal(o); };
     document.getElementById('deleteOrderBtn').onclick = async ()=>{
       if(confirm('¿Eliminar esta orden y todo su historial? Quedará en la Papelera 30 días por si la necesitas de vuelta.')){ await moveToTrash('orders', o.id); closeOrderModal(); }
@@ -2831,8 +3067,12 @@
               <div class="row-sub">${s.collected
                 ? '✅ Muestra recolectada'+(s.collectedBy?' por '+esc(s.collectedBy):'')+(s.collectedAt?' · '+fmtDateTime(s.collectedAt):'')
                 : '⏳ Muestra por recolectar'}</div>
+              <div style="margin-top:6px;font-size:12.5px;">
+                <span class="row-sub">Pruebas de esta muestra:</span>
+                ${SAMPLE_TESTS.map(t=>`<label style="margin-left:10px;cursor:pointer;white-space:nowrap;"><input type="checkbox" data-sample-plan="${t.key}" data-sample-id="${s.id}" ${plannedTests(s).some(k=>k[0]===t.key)?'checked':''}> ${t.label}</label>`).join('')}
+              </div>
               ${s.collected ? `<div style="margin-top:7px;font-size:12.5px;">
-                ${SAMPLE_TESTS.map(t=>renderSampleTest(s,t)).join('')}
+                ${SAMPLE_TESTS.filter(t=>plannedTests(s).some(k=>k[0]===t.key)).map(t=>renderSampleTest(s,t)).join('')}
               </div>` : ''}
             </div>
             <div style="display:flex;gap:6px;flex-wrap:wrap;">
@@ -2862,7 +3102,8 @@
     const addBtn = document.getElementById('addSampleBtn');
     if(addBtn) addBtn.onclick = async ()=>{
       const prev = latest().samples||[];
-      await saveSamples([...prev, {id:cryptoId(), collected:false, collectedAt:null, t7:false,t7At:null, t14:false,t14At:null, t28:false,t28At:null}]);
+      const last = prev[prev.length-1];
+      await saveSamples([...prev, {id:cryptoId(), tests: last ? plannedTests(last).map(k=>k[0]) : ['t7','t14','t28'], collected:false, collectedAt:null, t7:false,t7At:null, t14:false,t14At:null, t28:false,t28At:null}]);
     };
     document.querySelectorAll('[data-sample-toggle]').forEach(btn=>{
       btn.addEventListener('click', async ()=>{
@@ -2881,6 +3122,18 @@
         const id = btn.dataset.sampleRemove;
         if(!confirm('¿Quitar esta muestra de la orden?')) return;
         await saveSamples((latest().samples||[]).filter(s=>s.id!==id));
+      });
+    });
+    document.querySelectorAll('[data-sample-plan]').forEach(chk=>{
+      chk.addEventListener('change', async ()=>{
+        const id = chk.dataset.sampleId, key = chk.dataset.samplePlan;
+        const samples = (latest().samples||[]).map(s=>{
+          if(s.id!==id) return s;
+          const cur = plannedTests(s).map(k=>k[0]).filter(k=>k!==key);
+          if(chk.checked) cur.push(key);
+          return {...s, tests: TEST_KEYS.map(k=>k[0]).filter(k=>cur.includes(k))};
+        });
+        await saveSamples(samples);
       });
     });
     document.querySelectorAll('[data-sample-test]').forEach(chk=>{
@@ -3004,8 +3257,19 @@
         events.push({stage:'gabinete', person, at, note:'Pasó automáticamente a gabinete al terminar laboratorio.'});
         finalStage = 'gabinete';
       }
-      await patchDoc('orders', o.id, {events, currentStage: finalStage});
-      pingOrder(o, 'La orden '+(o.folio||'')+' ('+(o.client||'')+') pasó a: '+stageLabel(finalStage));
+      const patch = {events, currentStage: finalStage};
+      if(finalStage==='entregada'){
+        /* lo que se entrega ahora queda marcado como ya entregado */
+        patch.samples = (o.samples||[]).map(sm=>{
+          const c = {...sm};
+          plannedTests(sm).forEach(k=>{ if(sm[k[0]]) c[k[0]+'Del'] = true; });
+          return c;
+        });
+        const del = toDeliverTests(o);
+        if(del.length) events[events.length-1].note = ((note?note+' · ':'')+'Se entregó: '+del.map(x=>'prueba de '+x).join(', '));
+      }
+      await patchDoc('orders', o.id, patch);
+      pingOrder({...o, currentStage:finalStage}, 'La orden '+(o.folio||'')+' ('+(o.client||'')+') pasó a: '+stageLabel(finalStage));
       closeModal();
     };
     setTimeout(()=>{ const first = modalForm.querySelector('input,select,textarea'); if(first) first.focus(); },10);
@@ -3338,9 +3602,9 @@
   /* ============ BOOT ============ */
   renderAll(); // pinta de inmediato con la copia local (funciona sin internet)
   initStore(); // luego intenta conectar a la nube y sincronizar
-  /* El cuadro de "¿Quién eres?" ya NO se abre solo al entrar — taparía toda
-     la pantalla y parecería que la página no responde. Ahora solo se abre
-     si la persona le da clic al link "Decir quién eres" en la barra lateral. */
+  /* Siempre, al abrir la página, lo primero es preguntar quién eres (con el
+     nombre recordado ya seleccionado, para confirmar con un clic). */
+  openViewerPrompt(true);
 })();
 </script>
 </body>
