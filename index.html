@@ -524,13 +524,21 @@
   /* ============ SCHEMAS ============ */
   /* Estados de asistencia del personal (lo que se guarda es la etiqueta). */
   const ATTENDANCE_STATUSES = [
-    {label:'Llegué',                   emoji:'🚪', color:'var(--accent)'},
+    {label:'Llegué',            emoji:'🚪', color:'var(--good)'},
+    {label:'Salí a comer',      emoji:'🍽️', color:'var(--warn)'},
+    {label:'Regresé de comer',  emoji:'✅', color:'var(--good)'},
+    {label:'Me voy a casa',     emoji:'🏠', color:'var(--ink-faint)'}
+  ];
+  /* Estados de versiones anteriores: se siguen mostrando bien en el historial. */
+  const ATTENDANCE_LEGACY = [
     {label:'En laboratorio',           emoji:'🧪', color:'var(--good)'},
     {label:'En mi puesto de trabajo',  emoji:'💼', color:'var(--good)'},
     {label:'En campo',                 emoji:'🚧', color:'var(--warn)'},
     {label:'Salí',                     emoji:'🏁', color:'var(--ink-faint)'}
   ];
-  const ATTENDANCE_OUT = 'Salí';
+  const ATTENDANCE_OUT = 'Me voy a casa';
+  /* No está en el trabajo en este momento (comiendo o ya se fue). */
+  const ATTENDANCE_AWAY = ['Me voy a casa','Salí','Salí a comer'];
   const TABS = [
     {key:'dashboard', label:'Resumen', icon:'home'},
     {key:'finance',    label:'Finanzas', icon:'finance'},
@@ -755,6 +763,62 @@
   const POST_LAB_STAGES = ['lista','gabinete','porEntregar','entregada'];
   function labPending(o){
     return POST_LAB_STAGES.includes(o.currentStage) && labPendingTests(o).length>0;
+  }
+  /* Texto para el laboratorista: qué prueba sigue y cuándo toca. */
+  function nextLabTestText(o){
+    const items = [];
+    (o.samples||[]).forEach(s=>{
+      plannedTests(s).forEach(([key,from,to,label])=>{
+        if(s[key]) return;
+        const due = s.collected && s.collectedAt ? isoPlusDays(s.collectedAt, from) : null;
+        items.push({label, due});
+      });
+    });
+    if(!items.length) return '';
+    items.sort((a,b)=> (a.due?a.due.getTime():9e15)-(b.due?b.due.getTime():9e15));
+    const first = items[0];
+    const when = first.due ? ' · toca '+(first.due.toISOString().slice(0,10)<=TODAY?'<strong>hoy o ya pasó</strong>':fmtDate(first.due.toISOString().slice(0,10))) : ' · falta recolectar muestra';
+    return 'Siguiente: prueba de '+first.label+when;
+  }
+  function labPendingKeys(o){
+    const out = [];
+    (o.samples||[]).forEach(s=>{
+      plannedTests(s).forEach(k=>{ if(!s[k[0]] && !out.some(x=>x[0]===k[0])) out.push(k); });
+    });
+    return out.sort((a,b)=>a[1]-b[1]);
+  }
+  /* Pregunta qué prueba terminó el laboratorio y la deja lista para entregar. */
+  function openFinishTestForm(o){
+    const who0 = requirePersonName(); if(!who0) return;
+    const keys = labPendingKeys(o);
+    closeOrderModal();
+    modalTitle.textContent = 'Orden '+(o.folio||'')+' · ¿Qué prueba terminó?';
+    modalForm.innerHTML = `
+      <div class="field"><label>Elige la prueba que ya quedó terminada</label>
+        ${keys.map((k,i)=>`<label style="display:flex;align-items:center;gap:8px;padding:8px 0;cursor:pointer;font-size:15px;">
+          <input type="radio" name="f_finishTest" value="${k[0]}" ${i===0?'checked':''}> Prueba de ${k[3]}</label>`).join('')}
+        <div class="row-sub">Quedará como lista para entregar y la orden sigue en Laboratorio si faltan otras pruebas.</div>
+      </div>
+      <div class="field"><label for="f_ftnote">Nota (opcional)</label><textarea id="f_ftnote"></textarea></div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" id="cancelBtn">Cancelar</button>
+        <button type="submit" class="btn btn-accent">Marcar como terminada</button>
+      </div>`;
+    overlay.hidden = false;
+    document.getElementById('cancelBtn').onclick = closeModal;
+    modalForm.onsubmit = async (e)=>{
+      e.preventDefault();
+      const key = (modalForm.querySelector('input[name="f_finishTest"]:checked')||{}).value;
+      if(!key) return;
+      const label = (TEST_KEYS.find(k=>k[0]===key)||[])[3];
+      const now = new Date().toISOString();
+      const samples = (o.samples||[]).map(sm=> (plannedTests(sm).some(k=>k[0]===key) && !sm[key])
+        ? {...sm, [key]:true, [key+'At']:now, [key+'By']:who0} : sm);
+      const note = document.getElementById('f_ftnote').value;
+      const events = [...(o.events||[]), {stage:o.currentStage, person:who0, at:now, note:'Prueba de '+label+' terminada — lista para entregar'+(note?' · '+note:'')}];
+      await patchDoc('orders', o.id, {samples, events});
+      closeModal();
+    };
   }
   function joinLabels(arr){
     return arr.length>1 ? arr.slice(0,-1).join(', ')+' y '+arr[arr.length-1] : (arr[0]||'');
@@ -1772,6 +1836,7 @@
     const attn = [];
     readyOrders.forEach(o=>attn.push({swatch:'accent',tag:'Orden',title:o.folio+' · '+o.client,meta:'lista para entregar'}));
     activeOrders.filter(o=>o.scheduledDate && (o.scheduledDate===TODAY || o.scheduledDate===addDays(1)) && ['girada','aceptada','campo'].includes(o.currentStage)).forEach(o=>attn.push({swatch:'accent',tag:'Trabajo',title:o.folio+' · '+o.client+(orderOwner(o)?' · '+orderOwner(o):''),meta:'se realiza '+relDay(o.scheduledDate)}));
+    state.orders.filter(o=>toDeliverTests(o).length).forEach(o=>attn.push({swatch:'accent',tag:'Entrega',title:o.folio+' · '+o.client,meta:deliverText(o)+' · lista para entregar'}));
     state.orders.filter(labPending).forEach(o=>attn.push({swatch:'accent',tag:'Lab',title:o.folio+' · '+o.client,meta:'sigue en laboratorio · faltan pruebas de '+joinLabels(labPendingTests(o))}));
     state.orders.filter(needsSampleCollection).forEach(o=>{
       const isConcrete = CONCRETE_SERVICE_REGEX.test(o.serviceType||'');
@@ -2357,6 +2422,8 @@
   }
   function isMine(o){
     const owner = orderOwner(o);
+    /* quien hace las pruebas sigue viendo la orden como suya mientras falten pruebas */
+    if(labPending(o) && isAssigned(o)) return true;
     return !!(viewerName && owner && owner.trim().toLowerCase()===viewerName.trim().toLowerCase());
   }
 
@@ -2581,7 +2648,22 @@
         <p>No tienes órdenes pendientes asignadas por ahora.</p>
       </div></div>`;
     }
-    return syncBanner + filterBar + sections.map(sec=>`
+    const readyList = state.orders.filter(o=> toDeliverTests(o).length && (!ordersFilterMine || isMine(o)));
+    const readyPanel = readyList.length ? `
+      <div class="panel">
+        <div class="panel-head" style="border-left:4px solid var(--good);">
+          <h3>📄 Pruebas listas para entregar</h3>
+          <span class="badge-count">${readyList.length}</span>
+        </div>
+        ${readyList.map(o=>`<div class="order-row" data-id="${o.id}">
+          <span class="order-row-folio">${esc(o.folio)||'—'}</span>
+          <div class="order-row-main">
+            <div class="order-row-client">${esc(o.client)}${o.project?' · '+esc(o.project):''}</div>
+            <div class="row-sub"><span style="color:var(--good);font-weight:600;">📄 ${esc(deliverText(o))}</span>${labPendingTests(o).length?' · 🔬 faltan: '+esc(joinLabels(labPendingTests(o))):''}</div>
+          </div>
+        </div>`).join('')}
+      </div>` : '';
+    return syncBanner + filterBar + readyPanel + sections.map(sec=>`
       <div class="panel">
         <div class="panel-head" style="border-left:4px solid ${sec.group.color};">
           <h3>${sec.group.label}</h3>
@@ -2602,11 +2684,11 @@
     const subBits = [];
     if(labPending(o)){
       const faltan = joinLabels(labPendingTests(o));
-      if(inLabGroup) subBits.push(`<span style="color:var(--accent);font-weight:600;">${o.currentStage==='entregada'?'📦 ya entregado':'📦 va en '+esc(stageLabel(o.currentStage))} · 🔬 faltan pruebas de ${esc(faltan)}</span>`);
-      else if(o.currentStage==='entregada') subBits.push(`<span style="color:var(--accent);font-weight:600;">📦 entrega parcial — sigue en laboratorio: faltan ${esc(faltan)}</span>`);
+      if(inLabGroup) subBits.push(`<span style="color:var(--accent);font-weight:600;">${o.currentStage==='entregada'?'📦 ya entregado':'📦 va en '+esc(stageLabel(o.currentStage))} · 🔬 faltan pruebas de ${esc(faltan)} · ${nextLabTestText(o)}</span>`);
+      else if(o.currentStage==='entregada') subBits.push(`<span style="color:var(--accent);font-weight:600;">📦 entrega parcial — sigue en laboratorio: faltan ${esc(faltan)} · ${nextLabTestText(o)}</span>`);
       else subBits.push(`<span style="color:var(--accent);font-weight:600;">🔬 sigue en laboratorio: faltan ${esc(faltan)}</span>`);
     } else if(showStageTag) subBits.push('🔬 '+esc(stageLabel(o.currentStage)));
-    if(['lista','gabinete','porEntregar'].includes(o.currentStage) && deliverText(o)) subBits.push(`<span style="color:var(--good);font-weight:600;">📄 ${esc(deliverText(o))}</span>`);
+    if(deliverText(o)) subBits.push(`<span style="color:var(--good);font-weight:600;">📄 ${esc(deliverText(o))}</span>`);
     if(orderOwner(o)) subBits.push((isMine(o)?'⭐ ':'👷 ')+esc(orderOwner(o)));
     if(o.scheduledDate) subBits.push('📅 trabajo: '+(o.scheduledDate===TODAY?'<strong>hoy</strong>':fmtDate(o.scheduledDate)));
     if(last) subBits.push(esc(last.person)+' · '+relDay(last.at.slice(0,10)));
@@ -2644,7 +2726,7 @@
      historial son del panel interno. Cada marca es un registro con fecha y
      hora, así queda el historial de entradas y salidas. */
   function nowHHMM(){ return new Date().toTimeString().slice(0,5); }
-  function attendanceStatusInfo(label){ return ATTENDANCE_STATUSES.find(x=>x.label===label) || {label:label||'—', emoji:'•', color:'var(--ink-faint)'}; }
+  function attendanceStatusInfo(label){ return ATTENDANCE_STATUSES.concat(ATTENDANCE_LEGACY).find(x=>x.label===label) || {label:label||'—', emoji:'•', color:'var(--ink-faint)'}; }
   function attendanceRecordsFor(name, date){
     return (state.attendance||[])
       .filter(r=> sameName(r.name, name) && r.date===date)
@@ -2659,8 +2741,8 @@
     (state.attendance||[]).forEach(r=>{ if(r.date===TODAY && r.name && !names.some(n=>sameName(n,r.name))) names.push(r.name); });
     return names.map(name=>{
       const cur = currentAttendance(name);
-      const first = attendanceRecordsFor(name, TODAY).find(r=>r.status!==ATTENDANCE_OUT);
-      return {name, cur, first, here: !!(cur && cur.status!==ATTENDANCE_OUT)};
+      const first = attendanceRecordsFor(name, TODAY).find(r=>!ATTENDANCE_AWAY.includes(r.status));
+      return {name, cur, first, here: !!(cur && !ATTENDANCE_AWAY.includes(cur.status))};
     });
   }
   async function markAttendance(status){
@@ -2992,8 +3074,13 @@
              <button class="btn btn-accent" id="nextDeliveryBtn" style="width:100%;justify-content:center;margin-top:10px">📦 Iniciar siguiente entrega (pasar a Gabinete)</button>`
           : `<div class="empty-state" style="padding:14px 0 0"><p>Ciclo completo — orden entregada al cliente.</p></div>`)
       }
-      ${(['lista','gabinete','porEntregar'].includes(o.currentStage) && deliverText(o)) ? `<div class="row-sub" style="margin-top:8px;color:var(--good);font-weight:600;">📄 ${esc(deliverText(o))}</div>` : ''}
+      ${deliverText(o) ? `<div style="margin-top:12px;padding:12px;border:1.5px solid var(--good);border-radius:10px;">
+        <div style="font-weight:700;color:var(--good);">📄 Lista para entregar al cliente</div>
+        <div class="row-sub" style="margin:4px 0 8px;">${esc(deliverText(o))} — ya está terminada, puedes enviar el formato de entrega.</div>
+        <button class="btn btn-accent btn-sm" id="markDeliveredBtn">📦 Ya entregué esto al cliente</button>
+      </div>` : ''}
       ${(labPending(o) && next) ? `<div class="row-sub" style="margin-top:8px;">🔬 Sigue también en Laboratorio: faltan pruebas de ${esc(joinLabels(labPendingTests(o)))}.</div>` : ''}
+      ${labPendingKeys(o).length ? `<button class="btn btn-ghost" id="finishTestBtn" style="width:100%;justify-content:center;margin-top:10px;border:1.5px solid var(--good);color:var(--good);font-weight:600;">🧪 Terminé una prueba → dejarla lista para entregar</button>` : ''}
       ${renderOrderSamples(o)}
       ${isAdmin ? renderOrderFinance(o) : ''}
       <div class="modal-actions" style="margin-top:14px">
@@ -3002,6 +3089,27 @@
       </div>
     `;
     if(next) document.getElementById('advanceOrderBtn').onclick = ()=>openAdvanceForm(o, next);
+    const ftb = document.getElementById('finishTestBtn');
+    if(ftb) ftb.onclick = ()=>openFinishTestForm(o);
+    const mdb = document.getElementById('markDeliveredBtn');
+    if(mdb) mdb.onclick = async ()=>{
+      const who = requirePersonName(); if(!who) return;
+      const del = toDeliverTests(o);
+      if(!confirm('¿Confirmas que ya entregaste al cliente: '+del.map(x=>'prueba de '+x).join(', ')+'?')) return;
+      const samples = (o.samples||[]).map(sm=>{
+        const c = {...sm};
+        plannedTests(sm).forEach(k=>{ if(sm[k[0]]) c[k[0]+'Del'] = true; c[k[0]+'DelAt'] = sm[k[0]] ? new Date().toISOString() : c[k[0]+'DelAt']; });
+        return c;
+      });
+      const patch = {samples};
+      const events = [...(o.events||[])];
+      const noPending = labPendingTests({samples}).length===0;
+      const target = (noPending || ['lista','gabinete','porEntregar'].includes(o.currentStage)) ? 'entregada' : o.currentStage;
+      events.push({stage:target, person:who, at:new Date().toISOString(), note:'Se entregó: '+del.map(x=>'prueba de '+x).join(', ')+(noPending?'':' · sigue en laboratorio')});
+      patch.events = events; patch.currentStage = target;
+      await patchDoc('orders', o.id, patch);
+      closeOrderModal();
+    };
     const ndb = document.getElementById('nextDeliveryBtn');
     if(ndb) ndb.onclick = async ()=>{
       const who = requirePersonName(); if(!who) return;
@@ -3052,7 +3160,7 @@
         <input type="checkbox" data-sample-test="${t.key}" data-sample-id="${s.id}" ${done?'checked':''}>
         Prueba ${t.label}
       </label>
-      ${done && at ? `<span class="row-sub">${by?esc(by)+' · ':''}${fmtDateTime(at)}</span>` : ''}
+      ${done && at ? `<span class="row-sub">${by?esc(by)+' · ':''}${fmtDateTime(at)}${s[t.key+'Del']?' · 📦 entregada':' · 📄 lista para entregar'}</span>` : ''}
     </div>`;
   }
   function renderOrderSamples(o){
