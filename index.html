@@ -820,6 +820,9 @@
       closeModal();
     };
   }
+  /* ---- Gabinete: aviso simple para el formato de entrega ---- */
+  const GAB_STAGES = ['lista','gabinete','porEntregar'];
+  const GAB_FLAGS = {noEncuentro:'🔎 No la encuentro', faltanDatos:'📝 Faltan datos'};
   function joinLabels(arr){
     return arr.length>1 ? arr.slice(0,-1).join(', ')+' y '+arr[arr.length-1] : (arr[0]||'');
   }
@@ -946,6 +949,7 @@
   /* null = nunca se le preguntó; '' = prefirió no decir; string = su nombre. */
   let viewerName = readJSON(VIEWER_KEY, null);
   let ordersFilterMine = false;
+  let ordersSearchText = '';
   /* Periodo elegido en Finanzas para filtrar los gastos: 'month' | 'lastMonth' | 'year' | 'all'. */
   let financePeriod = 'month';
 
@@ -1836,6 +1840,7 @@
     const attn = [];
     readyOrders.forEach(o=>attn.push({swatch:'accent',tag:'Orden',title:o.folio+' · '+o.client,meta:'lista para entregar'}));
     activeOrders.filter(o=>o.scheduledDate && (o.scheduledDate===TODAY || o.scheduledDate===addDays(1)) && ['girada','aceptada','campo'].includes(o.currentStage)).forEach(o=>attn.push({swatch:'accent',tag:'Trabajo',title:o.folio+' · '+o.client+(orderOwner(o)?' · '+orderOwner(o):''),meta:'se realiza '+relDay(o.scheduledDate)}));
+    state.orders.filter(o=>GAB_STAGES.includes(o.currentStage) && GAB_FLAGS[o.gabFlag]).forEach(o=>attn.push({swatch:'danger',tag:'Gabinete',title:o.folio+' · '+o.client,meta:GAB_FLAGS[o.gabFlag].slice(3).toLowerCase()+' (formato de entrega)'}));
     state.orders.filter(o=>toDeliverTests(o).length).forEach(o=>attn.push({swatch:'accent',tag:'Entrega',title:o.folio+' · '+o.client,meta:deliverText(o)+' · lista para entregar'}));
     state.orders.filter(labPending).forEach(o=>attn.push({swatch:'accent',tag:'Lab',title:o.folio+' · '+o.client,meta:'sigue en laboratorio · faltan pruebas de '+joinLabels(labPendingTests(o))}));
     state.orders.filter(needsSampleCollection).forEach(o=>{
@@ -2663,7 +2668,8 @@
           </div>
         </div>`).join('')}
       </div>` : '';
-    return syncBanner + filterBar + readyPanel + sections.map(sec=>`
+    const searchBox = `<div class="order-filter-bar"><input id="orderSearch" type="search" value="${esc(ordersSearchText)}" placeholder="🔎 Buscar orden por folio, cliente u obra…" style="flex:1;min-width:200px;padding:9px 12px;border:1px solid var(--border);border-radius:8px;font:inherit;background:var(--surface);color:var(--ink);"></div>`;
+    return syncBanner + filterBar + searchBox + readyPanel + sections.map(sec=>`
       <div class="panel">
         <div class="panel-head" style="border-left:4px solid ${sec.group.color};">
           <h3>${sec.group.label}</h3>
@@ -2688,6 +2694,7 @@
       else if(o.currentStage==='entregada') subBits.push(`<span style="color:var(--accent);font-weight:600;">📦 entrega parcial — sigue en laboratorio: faltan ${esc(faltan)} · ${nextLabTestText(o)}</span>`);
       else subBits.push(`<span style="color:var(--accent);font-weight:600;">🔬 sigue en laboratorio: faltan ${esc(faltan)}</span>`);
     } else if(showStageTag) subBits.push('🔬 '+esc(stageLabel(o.currentStage)));
+    if(o.gabFlag && GAB_FLAGS[o.gabFlag]) subBits.push(`<span style="color:var(--danger);font-weight:600;">⚠ Gabinete: ${GAB_FLAGS[o.gabFlag]}</span>`);
     if(deliverText(o)) subBits.push(`<span style="color:var(--good);font-weight:600;">📄 ${esc(deliverText(o))}</span>`);
     if(orderOwner(o)) subBits.push((isMine(o)?'⭐ ':'👷 ')+esc(orderOwner(o)));
     if(o.scheduledDate) subBits.push('📅 trabajo: '+(o.scheduledDate===TODAY?'<strong>hoy</strong>':fmtDate(o.scheduledDate)));
@@ -2712,6 +2719,16 @@
     document.querySelectorAll('.order-row').forEach(el=>{
       el.addEventListener('click', ()=> openOrderDetail(el.dataset.id));
     });
+    const osb = document.getElementById('orderSearch');
+    if(osb){
+      const applySearch = ()=>{
+        ordersSearchText = osb.value;
+        const q = osb.value.trim().toLowerCase();
+        document.querySelectorAll('.order-row').forEach(r=>{ r.style.display = (!q || r.textContent.toLowerCase().includes(q)) ? '' : 'none'; });
+      };
+      osb.addEventListener('input', applySearch);
+      if(ordersSearchText) applySearch();
+    }
     document.querySelectorAll('[data-orderfilter]').forEach(btn=>{
       btn.addEventListener('click', ()=>{
         ordersFilterMine = btn.dataset.orderfilter==='mine';
@@ -3074,6 +3091,15 @@
              <button class="btn btn-accent" id="nextDeliveryBtn" style="width:100%;justify-content:center;margin-top:10px">📦 Iniciar siguiente entrega (pasar a Gabinete)</button>`
           : `<div class="empty-state" style="padding:14px 0 0"><p>Ciclo completo — orden entregada al cliente.</p></div>`)
       }
+      ${GAB_STAGES.includes(o.currentStage) ? `<div style="margin-top:12px;padding:12px;border:1.5px solid ${o.gabFlag?'var(--danger)':'var(--border)'};border-radius:10px;">
+        <div style="font-weight:700;">📋 Formato de entrega (Gabinete)</div>
+        ${o.gabFlag && GAB_FLAGS[o.gabFlag] ? `<div style="color:var(--danger);font-weight:600;margin:6px 0;">⚠ ${GAB_FLAGS[o.gabFlag]}${o.gabFlagBy?' — '+esc(o.gabFlagBy):''}</div>` : ''}
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
+          <button class="btn btn-ghost btn-sm" data-gabflag="noEncuentro">🔎 No la encuentro</button>
+          <button class="btn btn-ghost btn-sm" data-gabflag="faltanDatos">📝 Faltan datos</button>
+          ${o.gabFlag?`<button class="btn btn-ghost btn-sm" id="gabFlagClearBtn">✅ Ya se resolvió</button>`:''}
+        </div>
+      </div>` : ''}
       ${deliverText(o) ? `<div style="margin-top:12px;padding:12px;border:1.5px solid var(--good);border-radius:10px;">
         <div style="font-weight:700;color:var(--good);">📄 Lista para entregar al cliente</div>
         <div class="row-sub" style="margin:4px 0 8px;">${esc(deliverText(o))} — ya está terminada, puedes enviar el formato de entrega.</div>
@@ -3089,6 +3115,22 @@
       </div>
     `;
     if(next) document.getElementById('advanceOrderBtn').onclick = ()=>openAdvanceForm(o, next);
+    document.querySelectorAll('[data-gabflag]').forEach(btn=>{
+      btn.onclick = async ()=>{
+        const who = requirePersonName(); if(!who) return;
+        const flag = btn.dataset.gabflag;
+        const events = [...(o.events||[]), {stage:o.currentStage, person:who, at:new Date().toISOString(), note:'Gabinete avisa: '+GAB_FLAGS[flag]}];
+        await patchDoc('orders', o.id, {gabFlag:flag, gabFlagBy:who, events});
+        closeOrderModal();
+      };
+    });
+    const gfc = document.getElementById('gabFlagClearBtn');
+    if(gfc) gfc.onclick = async ()=>{
+      const who = requirePersonName(); if(!who) return;
+      const events = [...(o.events||[]), {stage:o.currentStage, person:who, at:new Date().toISOString(), note:'Se resolvió: '+(GAB_FLAGS[o.gabFlag]||'')}];
+      await patchDoc('orders', o.id, {gabFlag:'', gabFlagBy:'', events});
+      closeOrderModal();
+    };
     const ftb = document.getElementById('finishTestBtn');
     if(ftb) ftb.onclick = ()=>openFinishTestForm(o);
     const mdb = document.getElementById('markDeliveredBtn');
