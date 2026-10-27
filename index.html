@@ -634,7 +634,7 @@
         {key:'requestedBy',label:'¿Quién gira la orden?',type:'text',required:true,placeholder:'Ing. Paola Serrano'},
         {key:'client',label:'Cliente',type:'text',required:true,placeholder:'Desarrolladora Cumbres'},
         {key:'project',label:'Obra / proyecto',type:'text',placeholder:'Torre Norte, Etapa 2'},
-        {key:'serviceType',label:'Tipo de servicio',type:'select',options:[
+        {key:'serviceType',label:'Servicios de la orden',type:'multiService',options:[
           'Compactación en campo',
           'Mecánica de suelos - privado',
           'Mecánica de suelos - 3 sondeos',
@@ -2642,10 +2642,7 @@
       group:g,
       items: state.orders.filter(o=>g.stages.includes(o.currentStage) || (g.stages.includes('laboratorio') && labPending(o)))
         .filter(o=> !ordersFilterMine || isMine(o))
-        .sort((a,b)=>{
-          const la = (a.events||[]).slice(-1)[0]; const lb = (b.events||[]).slice(-1)[0];
-          return (lb&&lb.at||'').localeCompare(la&&la.at||'');
-        })
+        .sort(byClientThenDate)
     })).filter(sec=> !ordersFilterMine || sec.items.length);
     if(ordersFilterMine && !sections.length){
       return syncBanner + filterBar + `<div class="panel"><div class="empty-state">
@@ -2676,10 +2673,35 @@
           <span class="badge-count">${sec.items.length}</span>
         </div>
         ${sec.items.length
-          ? sec.items.map(o=>orderRowHtml(o, sec.group.stages.length>1, sec.group.stages.includes('laboratorio'))).join('')
+          ? orderRowsGrouped(sec.items, sec.group.stages.length>1, sec.group.stages.includes('laboratorio'))
           : `<div class="empty-state" style="padding:20px"><p>Sin órdenes en esta etapa.</p></div>`}
       </div>
     `).join('');
+  }
+  /* Órdenes del mismo cliente juntas; los clientes van ordenados por su
+     movimiento más reciente y, dentro de cada cliente, lo más nuevo primero. */
+  function orderClientKey(o){ return (o.client||'').trim().toLowerCase(); }
+  function orderLastAt(o){ const l=(o.events||[]).slice(-1)[0]; return (l&&l.at)||''; }
+  function byClientThenDate(a,b){
+    const ka = orderClientKey(a), kb = orderClientKey(b);
+    if(ka!==kb){
+      const latest = k=> state.orders.filter(x=>orderClientKey(x)===k).map(orderLastAt).sort().pop()||'';
+      const la = latest(ka), lb = latest(kb);
+      return lb.localeCompare(la) || ka.localeCompare(kb);
+    }
+    return orderLastAt(b).localeCompare(orderLastAt(a));
+  }
+  function orderRowsGrouped(items, showStageTag, inLabGroup){
+    const counts = {};
+    items.forEach(o=>{ const k=orderClientKey(o); counts[k]=(counts[k]||0)+1; });
+    let prev = null;
+    return items.map(o=>{
+      const k = orderClientKey(o);
+      let head = '';
+      if(k!==prev && counts[k]>1) head = `<div class="client-group-head" style="padding:8px 18px 2px;font-size:12px;font-weight:700;color:var(--ink-faint);text-transform:uppercase;letter-spacing:.04em;">👤 ${esc(o.client||'Sin cliente')} · ${counts[k]} órdenes</div>`;
+      prev = k;
+      return head + orderRowHtml(o, showStageTag, inLabGroup);
+    }).join('');
   }
   function orderRowHtml(o, showStageTag, inLabGroup){
     const last = (o.events||[]).slice(-1)[0];
@@ -2724,6 +2746,7 @@
       const applySearch = ()=>{
         ordersSearchText = osb.value;
         const q = osb.value.trim().toLowerCase();
+        document.querySelectorAll('.client-group-head').forEach(h=>{ h.style.display = q ? 'none' : ''; });
         document.querySelectorAll('.order-row').forEach(r=>{ r.style.display = (!q || r.textContent.toLowerCase().includes(q)) ? '' : 'none'; });
       };
       osb.addEventListener('input', applySearch);
@@ -2767,7 +2790,10 @@
     if(!name){ openViewerPrompt(true); return; }
     await saveDoc('attendance', null, {name, status, date:TODAY, time:nowHHMM(), ts:new Date().toISOString()});
   }
+  const attOpenDays = new Set();
+  let attOpenInit = false;
   function renderAttendance(){
+    if(!attOpenInit){ attOpenInit = true; attOpenDays.add(TODAY); }
     const name = currentPersonName();
     if(!name){
       return `<div class="panel"><div class="empty-state"><div class="glyph">👋</div>
@@ -2819,30 +2845,39 @@
           </div>`;
         }).join('')}
       </div>`;
-    const hist = [...(state.attendance||[])]
-      .sort((a,b)=> ((b.date||'')+(b.time||'')+(b.ts||'')).localeCompare((a.date||'')+(a.time||'')+(a.ts||'')))
-      .slice(0,60);
+    const byDay = {};
+    (state.attendance||[]).forEach(r=>{ const d=r.date||'sin-fecha'; (byDay[d]=byDay[d]||[]).push(r); });
+    const days = Object.keys(byDay).sort().reverse();
+    const dayName = d=> d==='sin-fecha' ? 'Sin fecha' : (d===TODAY ? 'Hoy · ' : (d===addDays(-1) ? 'Ayer · ' : ''))+fmtDate(d);
     const histHtml = `<div class="panel">
       <div class="panel-head"><h3>Historial de entradas y salidas</h3>
         <button class="btn btn-sm btn-ghost" id="attAddBtn">+ Agregar registro</button></div>
-      ${hist.length ? `<div class="table-wrap"><table>
-        <thead><tr><th>Persona</th><th>Estado</th><th>Fecha</th><th>Hora</th><th></th></tr></thead>
-        <tbody>${hist.map(r=>`<tr data-id="${r.id}">
-          <td class="row-title">${esc(r.name)}</td>
-          <td>${attendanceStatusInfo(r.status).emoji} ${esc(r.status)}</td>
-          <td>${r.date?fmtDate(r.date):'—'}</td>
-          <td class="num">${esc(r.time||'')}</td>
-          <td class="row-actions">
-            <button class="btn btn-sm btn-ghost" data-act="edit" data-col="attendance">Editar</button>
-            <button class="btn btn-sm btn-danger-text" data-act="delete" data-col="attendance">Eliminar</button>
-          </td></tr>`).join('')}</tbody></table></div>`
-        : `<div class="empty-state" style="padding:22px"><p>Aún no hay registros.</p></div>`}
+      ${days.length ? days.map(d=>{
+        const rows = byDay[d].sort((a,b)=> ((a.time||'')+(a.ts||'')).localeCompare((b.time||'')+(b.ts||'')));
+        const people = new Set(rows.map(r=>r.name)).size;
+        return `<details class="att-day" data-attday="${d}" ${attOpenDays.has(d)?'open':''} style="border-top:1px solid var(--border);">
+          <summary style="cursor:pointer;padding:12px 18px;font-weight:600;">${esc(dayName(d))} <span class="row-sub" style="display:inline;font-weight:400;">· ${people} persona${people===1?'':'s'} · ${rows.length} registro${rows.length===1?'':'s'}</span></summary>
+          <div class="table-wrap"><table>
+            <thead><tr><th>Persona</th><th>Estado</th><th>Hora</th><th></th></tr></thead>
+            <tbody>${rows.map(r=>`<tr data-id="${r.id}">
+              <td class="row-title">${esc(r.name)}</td>
+              <td>${attendanceStatusInfo(r.status).emoji} ${esc(r.status)}</td>
+              <td class="num">${esc(r.time||'')}</td>
+              <td class="row-actions">
+                <button class="btn btn-sm btn-ghost" data-act="edit" data-col="attendance">Editar</button>
+                <button class="btn btn-sm btn-danger-text" data-act="delete" data-col="attendance">Eliminar</button>
+              </td></tr>`).join('')}</tbody></table></div>
+        </details>`;
+      }).join('') : `<div class="empty-state" style="padding:22px"><p>Aún no hay registros.</p></div>`}
     </div>`;
     return mineHtml + boardHtml + histHtml;
   }
   function bindAttendance(){
     document.querySelectorAll('[data-att-status]').forEach(btn=>{
       btn.addEventListener('click', ()=> markAttendance(btn.dataset.attStatus));
+    });
+    document.querySelectorAll('details[data-attday]').forEach(det=>{
+      det.addEventListener('toggle', ()=>{ if(det.open) attOpenDays.add(det.dataset.attday); else attOpenDays.delete(det.dataset.attday); });
     });
     const setBtn = document.getElementById('attSetNameBtn');
     if(setBtn) setBtn.onclick = ()=>openViewerPrompt(false);
@@ -3063,7 +3098,7 @@
     document.getElementById('orderModalBody').innerHTML = `
       <div class="order-meta">
         <div class="row-title" style="font-size:15px">${esc(o.client)}${o.project?' · '+esc(o.project):''}</div>
-        <div class="row-sub">${esc(o.serviceType)||''}</div>
+        <div class="row-sub">${orderServices(o).length>1 ? orderServices(o).map((x,i)=>(i+1)+'. '+esc(x)).join('<br>') : esc(o.serviceType)||''}</div>
         ${orderOwner(o)?`<div class="row-sub">👷 ${(o.currentStage==='gabinete'||o.currentStage==='lista')?'Gabinete a cargo de':'La hará'}: ${esc(orderOwner(o))}</div>`:''}
         ${o.scheduledDate?`<div class="row-sub">📅 Trabajo programado: ${fmtDate(o.scheduledDate)}${o.scheduledDate===TODAY?' (hoy)':''}</div>`:''}
         <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
@@ -3311,28 +3346,34 @@
   function priceIsPerUnit(str){
     return /\/\s*(muestra|sondeo|m|hora|pieza|cm|cilindro)\b/i.test(str||'');
   }
-  function suggestOrderCosto(o){
-    if(!o.serviceType) return null;
-    const svc = (state.priceList||[]).find(p=>p.service===o.serviceType);
+  function priceOneService(name, n){
+    const svc = (state.priceList||[]).find(p=>p.service===name);
     if(!svc) return null;
     const amounts = parsePriceAmounts(svc.price);
-    if(!amounts.length) return null; // ESPECIAL / Según material / etc. — no hay número que sugerir
-    const n = Math.max((o.samples||[]).length, 1);
-    let total, detail;
+    if(!amounts.length) return null; // ESPECIAL / Según material / etc.
     if(amounts.length>=2){
-      /* Formato "1a: $X / 2a y sig.: $Y" — precio distinto para la primera
-         muestra y las adicionales (igual que Concreto en tu lista). */
+      /* Formato "1a: $X / 2a y sig.: $Y" */
       const [first, rest] = amounts;
-      total = first + Math.max(n-1,0)*rest;
-      detail = n>1 ? `1ª muestra ${money(first)} + ${n-1} adicional(es) × ${money(rest)}` : `1ª muestra: ${money(first)}`;
-    } else if(priceIsPerUnit(svc.price)){
-      total = amounts[0]*n;
-      detail = `${money(amounts[0])} × ${n} muestra${n===1?'':'s'}`;
-    } else {
-      total = amounts[0];
-      detail = 'precio fijo del servicio';
+      return {total: first + Math.max(n-1,0)*rest, detail: n>1 ? `1ª muestra ${money(first)} + ${n-1} adicional(es) × ${money(rest)}` : `1ª muestra: ${money(first)}`};
     }
-    return {total, detail, service:svc.service};
+    if(priceIsPerUnit(svc.price)) return {total: amounts[0]*n, detail: `${money(amounts[0])} × ${n} muestra${n===1?'':'s'}`};
+    return {total: amounts[0], detail: 'precio fijo'};
+  }
+  function suggestOrderCosto(o){
+    const services = orderServices(o);
+    if(!services.length) return null;
+    const n = Math.max((o.samples||[]).length, 1);
+    const parts = [], noPrice = [];
+    let total = 0;
+    services.forEach(name=>{
+      const r = priceOneService(name, n);
+      if(r){ total += r.total; parts.push(services.length>1 ? `${name}: ${money(r.total)} (${r.detail})` : r.detail); }
+      else noPrice.push(name);
+    });
+    if(!parts.length) return null;
+    let detail = parts.join(' · ');
+    if(noPrice.length) detail += ' · sin precio fijo (captúralo a mano): '+noPrice.join(', ');
+    return {total, detail, service: services.join(' + ')};
   }
   function renderOrderFinance(o){
     const costo = Number(o.costo)||0;
@@ -3442,6 +3483,7 @@
         <button type="submit" class="btn btn-accent">Girar orden</button>
       </div>`;
     overlay.hidden = false;
+    const getServices = bindServiceEditor();
     const folioInput = document.getElementById('f_folio');
     if(folioInput){
       folioInput.readOnly = true;
@@ -3453,6 +3495,8 @@
       e.preventDefault();
       const data = {};
       schema.fields.forEach(f=>{ data[f.key] = document.getElementById('f_'+f.key).value; });
+      data.services = getServices ? getServices() : [];
+      data.serviceType = data.services.join(' + ');
       data.folio = suggested; // el folio siempre es el generado, aunque el campo esté deshabilitado
       data.currentStage = 'girada';
       data.events = [{stage:'girada', person:data.requestedBy, at:new Date().toISOString(), note:''}];
@@ -3472,11 +3516,14 @@
         <button type="submit" class="btn btn-accent">Guardar</button>
       </div>`;
     overlay.hidden = false;
+    const getServices = bindServiceEditor();
     document.getElementById('cancelBtn').onclick = closeModal;
     modalForm.onsubmit = async (e)=>{
       e.preventDefault();
       const data = {};
       schema.fields.forEach(f=>{ data[f.key] = document.getElementById('f_'+f.key).value; });
+      data.services = getServices ? getServices() : [];
+      data.serviceType = data.services.join(' + ');
       const reassigned = data.assignedTo && data.assignedTo!==o.assignedTo;
       await patchDoc('orders', o.id, data);
       await ensureClientExists(data.client);
@@ -3702,6 +3749,19 @@
           ${f.options.map(o=>`<option value="${o}" ${o===val?'selected':''}>${o}</option>`).join('')}
         </select></div>`;
     }
+    if(f.type==='multiService'){
+      /* Una orden puede llevar uno, dos, tres… servicios. Se guarda la lista
+         en o.services y, para que todo lo demás siga funcionando, el texto
+         unido en o.serviceType ("A + B"). */
+      const list = doc ? orderServices(doc) : [];
+      const initial = list.length ? list : [f.default || f.options[0]];
+      return `<div class="field" id="svcEditor" data-initial='${esc(JSON.stringify(initial))}'>
+        <label>${f.label}</label>
+        <div id="svcList"></div>
+        <button type="button" class="btn btn-ghost btn-sm" id="svcAddBtn" style="margin-top:6px;">+ Agregar otro servicio</button>
+        <input type="hidden" id="f_${f.key}" value="${esc(initial.join(' + '))}">
+      </div>`;
+    }
     if(f.type==='orderSelect'){
       /* Lista dinámica de órdenes (folio · cliente), calculada al abrir el
          formulario — no puede vivir en SCHEMAS porque las órdenes cambian
@@ -3734,6 +3794,32 @@
     return `<div class="field"><label for="f_${f.key}">${f.label}</label>
       <input id="f_${f.key}" type="${f.type}" value="${esc(val)}" placeholder="${f.placeholder||''}" ${req}${clientList}>
       </div>`;
+  }
+  function orderServices(o){
+    if(Array.isArray(o.services) && o.services.length) return o.services.filter(Boolean);
+    return o.serviceType ? [o.serviceType] : [];
+  }
+  /* Editor de servicios múltiples dentro del formulario de la orden. */
+  function bindServiceEditor(){
+    const box = document.getElementById('svcEditor'); if(!box) return;
+    const opts = SCHEMAS.orders.fields.find(f=>f.key==='serviceType').options;
+    let vals = [];
+    try{ vals = JSON.parse(box.dataset.initial); }catch(e){ vals = [opts[0]]; }
+    const hidden = document.getElementById('f_serviceType');
+    const listEl = document.getElementById('svcList');
+    function sync(){ hidden.value = vals.filter(Boolean).join(' + '); }
+    function draw(){
+      listEl.innerHTML = vals.map((v,i)=>`<div class="svc-row" style="display:flex;gap:6px;margin-bottom:6px;align-items:center;">
+        <span class="row-sub" style="min-width:18px;">${i+1}.</span>
+        <select class="svc-select" data-i="${i}" style="flex:1;min-width:0;">${opts.map(o=>`<option value="${esc(o)}" ${o===v?'selected':''}>${esc(o)}</option>`).join('')}${v && !opts.includes(v) ? `<option value="${esc(v)}" selected>${esc(v)}</option>` : ''}</select>
+        ${vals.length>1 ? `<button type="button" class="btn btn-sm btn-danger-text" data-svc-remove="${i}">Quitar</button>` : ''}
+      </div>`).join('');
+      listEl.querySelectorAll('.svc-select').forEach(sel=> sel.addEventListener('change', ()=>{ vals[Number(sel.dataset.i)] = sel.value; sync(); }));
+      listEl.querySelectorAll('[data-svc-remove]').forEach(b=> b.addEventListener('click', ()=>{ vals.splice(Number(b.dataset.svcRemove),1); draw(); sync(); }));
+    }
+    document.getElementById('svcAddBtn').onclick = ()=>{ vals.push(opts[0]); draw(); sync(); };
+    draw(); sync();
+    return ()=> vals.filter(Boolean);
   }
   function closeModal(){ overlay.hidden = true; editing = {col:null,id:null}; }
   document.getElementById('modalClose').addEventListener('click', closeModal);
