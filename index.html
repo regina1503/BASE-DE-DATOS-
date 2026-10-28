@@ -669,6 +669,7 @@
         ],default:'Mecánica de suelos - privado'},
         {key:'assignedTo',label:'¿Quién la hará?',type:'teamSelect'},
         {key:'scheduledDate',label:'Fecha en que se realizará el trabajo',type:'date'},
+        {key:'scheduledTime',label:'Hora en que se realizará el trabajo',type:'time'},
         {key:'priority',label:'Prioridad',type:'select',options:['Alta','Media','Baja'],default:'Media'},
         {key:'notes',label:'Notas',type:'textarea',placeholder:'Número de sondeos, profundidad, ensayos requeridos…'}
       ]
@@ -1139,6 +1140,10 @@
       }
       firebase.initializeApp(FIREBASE_CONFIG);
       db = firebase.firestore();
+      /* Algunas redes (datos móviles de ciertas compañías, redes con filtro,
+         VPN) bloquean la conexión normal de Firestore y la página se queda
+         sin datos. Con esto detecta el problema y cambia sola a otro método. */
+      try{ if(typeof db.settings==='function') db.settings({experimentalAutoDetectLongPolling:true, merge:true}); }catch(e){}
       try{ await db.enablePersistence({synchronizeTabs:true}); }
       catch(e){ /* varias pestañas abiertas o navegador sin soporte: sigue
                    funcionando, solo sin caché offline avanzada en esta pestaña */ }
@@ -1839,7 +1844,7 @@
 
     const attn = [];
     readyOrders.forEach(o=>attn.push({swatch:'accent',tag:'Orden',title:o.folio+' · '+o.client,meta:'lista para entregar'}));
-    activeOrders.filter(o=>o.scheduledDate && (o.scheduledDate===TODAY || o.scheduledDate===addDays(1)) && ['girada','aceptada','campo'].includes(o.currentStage)).forEach(o=>attn.push({swatch:'accent',tag:'Trabajo',title:o.folio+' · '+o.client+(orderOwner(o)?' · '+orderOwner(o):''),meta:'se realiza '+relDay(o.scheduledDate)}));
+    activeOrders.filter(o=>o.scheduledDate && (o.scheduledDate===TODAY || o.scheduledDate===addDays(1)) && ['girada','aceptada','campo'].includes(o.currentStage)).forEach(o=>attn.push({swatch:'accent',tag:'Trabajo',title:o.folio+' · '+o.client+(orderOwner(o)?' · '+orderOwner(o):''),meta:'se realiza '+relDay(o.scheduledDate)+schedTime(o)}));
     state.orders.filter(o=>GAB_STAGES.includes(o.currentStage) && GAB_FLAGS[o.gabFlag]).forEach(o=>attn.push({swatch:'danger',tag:'Gabinete',title:o.folio+' · '+o.client,meta:GAB_FLAGS[o.gabFlag].slice(3).toLowerCase()+' (formato de entrega)'}));
     state.orders.filter(o=>toDeliverTests(o).length).forEach(o=>attn.push({swatch:'accent',tag:'Entrega',title:o.folio+' · '+o.client,meta:deliverText(o)+' · lista para entregar'}));
     state.orders.filter(labPending).forEach(o=>attn.push({swatch:'accent',tag:'Lab',title:o.folio+' · '+o.client,meta:'sigue en laboratorio · faltan pruebas de '+joinLabels(labPendingTests(o))}));
@@ -2207,7 +2212,7 @@
     const headers = ['Folio','Cliente','Proyecto','Servicio','Encargado','Fecha del trabajo','Etapa','Prioridad','Costo','Anticipo','Saldo','Notas'];
     const rows = state.orders.map(o=>{
       const costo = Number(o.costo)||0, anticipo = Number(o.anticipo)||0;
-      return [o.folio, o.client, o.project||'', o.serviceType||'', orderOwner(o), o.scheduledDate||'', stageLabel(o.currentStage), o.priority||'', costo, anticipo, costo-anticipo, o.notes||''];
+      return [o.folio, o.client, o.project||'', o.serviceType||'', orderOwner(o), (o.scheduledDate||'')+(o.scheduledTime?' '+o.scheduledTime:''), stageLabel(o.currentStage), o.priority||'', costo, anticipo, costo-anticipo, o.notes||''];
     });
     downloadCSV('ordenes_'+TODAY+'.csv', headers, rows);
   }
@@ -2221,7 +2226,7 @@
       <th class="num">Costo</th><th class="num">Anticipo</th><th class="num">Saldo</th>
       </tr></thead><tbody>${rows.map(r=>`<tr>
         <td>${esc(r.o.folio)}</td><td>${esc(r.o.client)}</td><td>${esc(r.o.project||'')}</td>
-        <td>${esc(r.o.serviceType||'')}</td><td>${esc(orderOwner(r.o))}</td><td>${esc(r.o.scheduledDate?fmtDate(r.o.scheduledDate):'')}</td><td>${esc(stageLabel(r.o.currentStage))}</td>
+        <td>${esc(r.o.serviceType||'')}</td><td>${esc(orderOwner(r.o))}</td><td>${esc(r.o.scheduledDate?fmtDate(r.o.scheduledDate)+(r.o.scheduledTime?' '+r.o.scheduledTime:''):'')}</td><td>${esc(stageLabel(r.o.currentStage))}</td>
         <td>${esc(r.o.priority||'')}</td><td class="num">${r.costo?money(r.costo):''}</td>
         <td class="num">${r.costo?money(r.anticipo):''}</td><td class="num">${r.costo?money(r.saldo):''}</td>
       </tr>`).join('')}</tbody></table>`;
@@ -2551,7 +2556,7 @@
         <span class="swatch ${days>=STALL_DAYS?'danger':'accent'}"></span>
         <span class="tag">Orden</span>
         <span class="title">${esc(o.folio)} · ${esc(o.client)}</span>
-        <span class="meta">${stageLabel(o.currentStage)}${o.scheduledDate?' · 📅 '+(o.scheduledDate===TODAY?'hoy':fmtDate(o.scheduledDate)):''}${days? ' · sin avance hace '+days+' día'+(days===1?'':'s') : ''}</span>
+        <span class="meta">${stageLabel(o.currentStage)}${o.scheduledDate?' · 📅 '+(o.scheduledDate===TODAY?'hoy':fmtDate(o.scheduledDate))+schedTime(o):''}${days? ' · sin avance hace '+days+' día'+(days===1?'':'s') : ''}</span>
       </div>`).join('')}
     </div>` : '';
     const toCollectHtml = toCollect.length ? `<div class="panel">
@@ -2716,10 +2721,11 @@
       else if(o.currentStage==='entregada') subBits.push(`<span style="color:var(--accent);font-weight:600;">📦 entrega parcial — sigue en laboratorio: faltan ${esc(faltan)} · ${nextLabTestText(o)}</span>`);
       else subBits.push(`<span style="color:var(--accent);font-weight:600;">🔬 sigue en laboratorio: faltan ${esc(faltan)}</span>`);
     } else if(showStageTag) subBits.push('🔬 '+esc(stageLabel(o.currentStage)));
+    progressBadges(o).forEach(t=>subBits.push(`<span style="color:var(--accent);font-weight:600;">📈 ${esc(t)}</span>`));
     if(o.gabFlag && GAB_FLAGS[o.gabFlag]) subBits.push(`<span style="color:var(--danger);font-weight:600;">⚠ Gabinete: ${GAB_FLAGS[o.gabFlag]}</span>`);
     if(deliverText(o)) subBits.push(`<span style="color:var(--good);font-weight:600;">📄 ${esc(deliverText(o))}</span>`);
     if(orderOwner(o)) subBits.push((isMine(o)?'⭐ ':'👷 ')+esc(orderOwner(o)));
-    if(o.scheduledDate) subBits.push('📅 trabajo: '+(o.scheduledDate===TODAY?'<strong>hoy</strong>':fmtDate(o.scheduledDate)));
+    if(o.scheduledDate) subBits.push('📅 trabajo: '+(o.scheduledDate===TODAY?'<strong>hoy</strong>':fmtDate(o.scheduledDate))+schedTime(o));
     if(last) subBits.push(esc(last.person)+' · '+relDay(last.at.slice(0,10)));
     if(isStalled) subBits.push(`<span style="color:var(--warn);font-weight:600;">⚠ sin avance hace ${stalledDays} días</span>`);
     if(needsSampleCollection(o)) subBits.push(`<span style="color:var(--warn);font-weight:600;">🧺 recolectar muestra${CONCRETE_SERVICE_REGEX.test(o.serviceType||'')?' · 🧱 Concreto':''}</span>`);
@@ -3100,7 +3106,7 @@
         <div class="row-title" style="font-size:15px">${esc(o.client)}${o.project?' · '+esc(o.project):''}</div>
         <div class="row-sub">${orderServices(o).length>1 ? orderServices(o).map((x,i)=>(i+1)+'. '+esc(x)).join('<br>') : esc(o.serviceType)||''}</div>
         ${orderOwner(o)?`<div class="row-sub">👷 ${(o.currentStage==='gabinete'||o.currentStage==='lista')?'Gabinete a cargo de':'La hará'}: ${esc(orderOwner(o))}</div>`:''}
-        ${o.scheduledDate?`<div class="row-sub">📅 Trabajo programado: ${fmtDate(o.scheduledDate)}${o.scheduledDate===TODAY?' (hoy)':''}</div>`:''}
+        ${o.scheduledDate?`<div class="row-sub">📅 Trabajo programado: ${fmtDate(o.scheduledDate)}${schedTime(o)}${o.scheduledDate===TODAY?' (hoy)':''}</div>`:''}
         <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
           <span class="pill ${stageInfo(o.currentStage).pill}">${stageLabel(o.currentStage)}</span>
           ${o.priority?`<span class="pill ${statusClass(o.priority)}">${esc(o.priority)}</span>`:''}
@@ -3141,6 +3147,15 @@
         <button class="btn btn-accent btn-sm" id="markDeliveredBtn">📦 Ya entregué esto al cliente</button>
       </div>` : ''}
       ${(labPending(o) && next) ? `<div class="row-sub" style="margin-top:8px;">🔬 Sigue también en Laboratorio: faltan pruebas de ${esc(joinLabels(labPendingTests(o)))}.</div>` : ''}
+      ${progressAreas(o).length ? `<div style="margin-top:12px;padding:12px;border:1.5px solid var(--accent);border-radius:10px;">
+        <div style="font-weight:700;">📈 Avance</div>
+        ${progressAreas(o).map(a=>{ const pr = progressOf(o,a.key); return `<div style="margin:8px 0;">
+          <div style="display:flex;justify-content:space-between;font-size:13px;"><span>${a.icon} ${a.label}</span><strong>${pr?pr.pct+'%':'sin avance registrado'}</strong></div>
+          <div style="height:8px;border-radius:6px;background:var(--surface-2);overflow:hidden;margin:4px 0;"><div style="height:100%;width:${pr?pr.pct:0}%;background:var(--accent);"></div></div>
+          ${pr?`<div class="row-sub">${esc(pr.by||'')} · ${fmtDateTime(pr.at)}${pr.note?' · '+esc(pr.note):''}</div>`:''}
+          <button class="btn btn-ghost btn-sm" data-progress="${a.key}" style="margin-top:4px;">+ Registrar avance de ${a.label.toLowerCase()}</button>
+        </div>`; }).join('')}
+      </div>` : ''}
       ${labPendingKeys(o).length ? `<button class="btn btn-ghost" id="finishTestBtn" style="width:100%;justify-content:center;margin-top:10px;border:1.5px solid var(--good);color:var(--good);font-weight:600;">🧪 Terminé una prueba → dejarla lista para entregar</button>` : ''}
       ${renderOrderSamples(o)}
       ${isAdmin ? renderOrderFinance(o) : ''}
@@ -3158,6 +3173,9 @@
         await patchDoc('orders', o.id, {gabFlag:flag, gabFlagBy:who, events});
         closeOrderModal();
       };
+    });
+    document.querySelectorAll('[data-progress]').forEach(btn=>{
+      btn.onclick = ()=> openProgressForm(o, progressAreas(o).find(a=>a.key===btn.dataset.progress));
     });
     const gfc = document.getElementById('gabFlagClearBtn');
     if(gfc) gfc.onclick = async ()=>{
@@ -3795,6 +3813,47 @@
       <input id="f_${f.key}" type="${f.type}" value="${esc(val)}" placeholder="${f.placeholder||''}" ${req}${clientList}>
       </div>`;
   }
+  /* ---- Avance (sin cambiar de etapa) en laboratorio y en gabinete ---- */
+  function progressAreas(o){
+    const areas = [];
+    if(['laboratorio','analisis'].includes(o.currentStage) || labPending(o)) areas.push({key:'lab', label:'Laboratorio', icon:'🔬'});
+    if(['lista','gabinete'].includes(o.currentStage)) areas.push({key:'gab', label:'Gabinete', icon:'🗂️'});
+    return areas;
+  }
+  function progressOf(o, key){ return (o.progress||{})[key] || null; }
+  function openProgressForm(o, area){
+    const who0 = requirePersonName(); if(!who0) return;
+    const cur = progressOf(o, area.key);
+    closeOrderModal();
+    modalTitle.textContent = 'Avance de '+area.label+' · '+(o.folio||'');
+    modalForm.innerHTML = `
+      <div class="field"><label for="f_pct">¿Cuánto lleva? <strong id="f_pctOut">${cur?cur.pct:0}%</strong></label>
+        <input id="f_pct" type="range" min="0" max="100" step="5" value="${cur?cur.pct:0}"></div>
+      <div class="field"><label for="f_pnote">¿Qué se avanzó? (opcional)</label>
+        <textarea id="f_pnote" placeholder="Ej. Ya se hicieron 3 de 5 ensayes"></textarea></div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" id="cancelBtn">Cancelar</button>
+        <button type="submit" class="btn btn-accent">Guardar avance</button>
+      </div>`;
+    overlay.hidden = false;
+    const rng = document.getElementById('f_pct');
+    rng.addEventListener('input', ()=>{ document.getElementById('f_pctOut').textContent = rng.value+'%'; });
+    document.getElementById('cancelBtn').onclick = closeModal;
+    modalForm.onsubmit = async (e)=>{
+      e.preventDefault();
+      const pct = Number(rng.value)||0;
+      const note = document.getElementById('f_pnote').value.trim();
+      const at = new Date().toISOString();
+      const progress = {...(o.progress||{}), [area.key]: {pct, note, by:who0, at}};
+      const events = [...(o.events||[]), {stage:o.currentStage, person:who0, at, note:'Avance de '+area.label+': '+pct+'%'+(note?' · '+note:'')}];
+      await patchDoc('orders', o.id, {progress, events});
+      closeModal();
+    };
+  }
+  function progressBadges(o){
+    return progressAreas(o).map(a=>{ const pr = progressOf(o,a.key); return pr ? `${a.icon} ${a.label}: ${pr.pct}%` : ''; }).filter(Boolean);
+  }
+  function schedTime(o){ return o.scheduledTime ? ' a las '+o.scheduledTime : ''; }
   function orderServices(o){
     if(Array.isArray(o.services) && o.services.length) return o.services.filter(Boolean);
     return o.serviceType ? [o.serviceType] : [];
