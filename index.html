@@ -2687,7 +2687,7 @@
         ${sec.items.length
           ? ((sec.group.stages.includes('gabinete') && viewerIsGabineteOwner())
               ? gabineteRowsForOwner(sec.items, sec.group.stages.length>1)
-              : orderRowsGrouped(sec.items, sec.group.stages.length>1, sec.group.stages.includes('laboratorio')))
+              : orderRowsGrouped(sec.items, sec.group.stages.length>1, sec.group.stages.includes('laboratorio'), sec.group.stages.includes('porEntregar')))
           : `<div class="empty-state" style="padding:20px"><p>Sin órdenes en esta etapa.</p></div>`}
       </div>
     `).join('');
@@ -2734,17 +2734,40 @@
     if(resto.length)  html += ((noEnc.length||faltan.length||avance.length) ? head('🗂️ Sin avance todavía', resto.length, 'var(--ink-faint)') : '') + orderRowsGrouped(resto, showStageTag, false);
     return html;
   }
-  function orderRowsGrouped(items, showStageTag, inLabGroup){
+  /* En "Lista para entregar al cliente" las órdenes del mismo cliente se
+     muestran comprimidas (solo un resumen); con la flechita se abren y
+     cierran. Se recuerda cuáles abriste mientras la página siga abierta. */
+  const expandedClientGroups = new Set();
+  function orderRowsGrouped(items, showStageTag, inLabGroup, collapsible){
     const counts = {};
     items.forEach(o=>{ const k=orderClientKey(o); counts[k]=(counts[k]||0)+1; });
-    let prev = null;
-    return items.map(o=>{
-      const k = orderClientKey(o);
-      let head = '';
-      if(k!==prev && counts[k]>1) head = `<div class="client-group-head" style="padding:8px 18px 2px;font-size:12px;font-weight:700;color:var(--ink-faint);text-transform:uppercase;letter-spacing:.04em;">👤 ${esc(o.client||'Sin cliente')} · ${counts[k]} órdenes</div>`;
-      prev = k;
-      return head + orderRowHtml(o, showStageTag, inLabGroup);
-    }).join('');
+    let html = '';
+    for(let i=0; i<items.length; ){
+      const o = items[i], k = orderClientKey(o);
+      let j = i; while(j<items.length && orderClientKey(items[j])===k) j++;
+      const run = items.slice(i, j);
+      if(run.length>1 && collapsible){
+        const gid = 'entrega:'+k;
+        const open = expandedClientGroups.has(gid);
+        const folios = run.map(x=>x.folio||'—');
+        const foliosTxt = folios.length>4 ? folios.slice(0,4).join(', ')+' y '+(folios.length-4)+' más' : joinLabels(folios);
+        html += `<div class="client-group-head client-group-toggle" data-gid="${esc(gid)}" role="button" tabindex="0" aria-expanded="${open}" style="display:flex;align-items:center;gap:10px;padding:12px 18px;cursor:pointer;border-top:1px solid var(--border);user-select:none;">
+            <span class="cg-arrow" style="display:inline-block;width:14px;font-size:13px;color:var(--ink-faint);transition:transform .15s;transform:rotate(${open?90:0}deg);">▶</span>
+            <div style="flex:1;min-width:0;">
+              <div style="font-weight:700;">👤 ${esc(o.client||'Sin cliente')} <span style="color:var(--ink-faint);font-weight:600;">· ${run.length} órdenes</span></div>
+              <div class="row-sub" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(foliosTxt)}</div>
+            </div>
+          </div>
+          <div class="client-group-body" data-gid="${esc(gid)}" style="${open?'':'display:none;'}">${run.map(x=>orderRowHtml(x, showStageTag, inLabGroup)).join('')}</div>`;
+      } else {
+        run.forEach((x,idx)=>{
+          if(idx===0 && run.length>1) html += `<div class="client-group-head" style="padding:8px 18px 2px;font-size:12px;font-weight:700;color:var(--ink-faint);text-transform:uppercase;letter-spacing:.04em;">👤 ${esc(x.client||'Sin cliente')} · ${counts[k]} órdenes</div>`;
+          html += orderRowHtml(x, showStageTag, inLabGroup);
+        });
+      }
+      i = j;
+    }
+    return html;
   }
   function orderRowHtml(o, showStageTag, inLabGroup){
     const last = (o.events||[]).slice(-1)[0];
@@ -2786,12 +2809,27 @@
     document.querySelectorAll('.order-row').forEach(el=>{
       el.addEventListener('click', ()=> openOrderDetail(el.dataset.id));
     });
+    document.querySelectorAll('.client-group-toggle').forEach(h=>{
+      const toggle = ()=>{
+        const gid = h.dataset.gid;
+        const open = !expandedClientGroups.has(gid);
+        if(open) expandedClientGroups.add(gid); else expandedClientGroups.delete(gid);
+        h.setAttribute('aria-expanded', open);
+        const arrow = h.querySelector('.cg-arrow'); if(arrow) arrow.style.transform = 'rotate('+(open?90:0)+'deg)';
+        const body = h.nextElementSibling;
+        if(body && body.classList.contains('client-group-body')) body.style.display = open ? '' : 'none';
+      };
+      h.addEventListener('click', toggle);
+      h.addEventListener('keydown', e=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); toggle(); } });
+    });
     const osb = document.getElementById('orderSearch');
     if(osb){
       const applySearch = ()=>{
         ordersSearchText = osb.value;
         const q = osb.value.trim().toLowerCase();
-        document.querySelectorAll('.client-group-head').forEach(h=>{ h.style.display = q ? 'none' : ''; });
+        document.querySelectorAll('.client-group-head').forEach(h=>{ h.style.display = q ? 'none' : (h.classList.contains('client-group-toggle') ? 'flex' : ''); });
+        /* al buscar se abren los grupos comprimidos; al borrar la búsqueda vuelven como estaban */
+        document.querySelectorAll('.client-group-body').forEach(b=>{ b.style.display = (q || expandedClientGroups.has(b.dataset.gid)) ? '' : 'none'; });
         document.querySelectorAll('.order-row').forEach(r=>{ r.style.display = (!q || r.textContent.toLowerCase().includes(q)) ? '' : 'none'; });
       };
       osb.addEventListener('input', applySearch);
