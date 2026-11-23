@@ -2706,15 +2706,18 @@
   function viewerIsGabineteOwner(){ return sameName(currentPersonName(), GABINETE_OWNER); }
   function gabPct(o){ const pr = progressOf(o,'gab'); return pr ? (Number(pr.pct)||0) : 0; }
   function gabineteRowsForOwner(items, showStageTag){
-    const faltan = items.filter(o=> o.gabFlag==='faltanDatos');
-    const avance = items.filter(o=> o.gabFlag!=='faltanDatos' && gabPct(o)>0)
+    const noEnc  = items.filter(o=> o.gabPrivNoEncuentro);
+    const rest0  = items.filter(o=> !o.gabPrivNoEncuentro);
+    const faltan = rest0.filter(o=> o.gabFlag==='faltanDatos');
+    const avance = rest0.filter(o=> o.gabFlag!=='faltanDatos' && gabPct(o)>0)
       .sort((a,b)=> gabPct(b)-gabPct(a));
-    const resto  = items.filter(o=> o.gabFlag!=='faltanDatos' && !(gabPct(o)>0));
+    const resto  = rest0.filter(o=> o.gabFlag!=='faltanDatos' && !(gabPct(o)>0));
     const head = (txt,n,color)=> `<div class="client-group-head gab-subgroup-head" style="padding:10px 18px 4px;font-size:12.5px;font-weight:800;color:${color};text-transform:uppercase;letter-spacing:.04em;border-top:1px solid var(--border);">${txt} · ${n}</div>`;
     let html = '';
+    if(noEnc.length)  html += head('🔒 No la encuentro (solo tú lo ves)', noEnc.length, 'var(--warn)') + noEnc.map(o=>orderRowHtml(o, showStageTag, false)).join('');
     if(faltan.length) html += head('📝 Faltan datos', faltan.length, 'var(--danger)') + faltan.map(o=>orderRowHtml(o, showStageTag, false)).join('');
     if(avance.length) html += head('📈 Con avance', avance.length, 'var(--accent)') + avance.map(o=>orderRowHtml(o, showStageTag, false)).join('');
-    if(resto.length)  html += ((faltan.length||avance.length) ? head('🗂️ Sin avance todavía', resto.length, 'var(--ink-faint)') : '') + orderRowsGrouped(resto, showStageTag, false);
+    if(resto.length)  html += ((noEnc.length||faltan.length||avance.length) ? head('🗂️ Sin avance todavía', resto.length, 'var(--ink-faint)') : '') + orderRowsGrouped(resto, showStageTag, false);
     return html;
   }
   function orderRowsGrouped(items, showStageTag, inLabGroup){
@@ -2743,6 +2746,7 @@
       else subBits.push(`<span style="color:var(--accent);font-weight:600;">🔬 sigue en laboratorio: faltan ${esc(faltan)}</span>`);
     } else if(showStageTag) subBits.push('🔬 '+esc(stageLabel(o.currentStage)));
     progressBadges(o).forEach(t=>subBits.push(`<span style="color:var(--accent);font-weight:600;">📈 ${esc(t)}</span>`));
+    if(o.gabPrivNoEncuentro && viewerIsGabineteOwner()) subBits.push(`<span style="color:var(--warn);font-weight:600;">🔒 No la encuentro (privado)</span>`);
     if(o.gabFlag && GAB_FLAGS[o.gabFlag]) subBits.push(`<span style="color:var(--danger);font-weight:600;">⚠ Gabinete: ${GAB_FLAGS[o.gabFlag]}</span>`);
     if(deliverText(o)) subBits.push(`<span style="color:var(--good);font-weight:600;">📄 ${esc(deliverText(o))}</span>`);
     if(orderOwner(o)) subBits.push((isMine(o)?'⭐ ':'👷 ')+esc(orderOwner(o)));
@@ -3161,6 +3165,10 @@
           <button class="btn btn-ghost btn-sm" data-gabflag="faltanDatos">📝 Faltan datos</button>
           ${o.gabFlag?`<button class="btn btn-ghost btn-sm" id="gabFlagClearBtn">✅ Ya se resolvió</button>`:''}
         </div>
+        ${viewerIsGabineteOwner() ? `<div style="margin-top:10px;padding-top:10px;border-top:1px dashed var(--border);">
+          <div class="row-sub" style="margin-bottom:6px;">🔒 Solo para ti${o.gabPrivNoEncuentro?' — <strong style="color:var(--warn);">marcada como "no la encuentro"</strong>':''} (los demás no lo ven)</div>
+          <button class="btn btn-ghost btn-sm" id="gabPrivNoEncBtn">${o.gabPrivNoEncuentro?'✅ Ya la encontré':'🔒 No la encuentro (privado)'}</button>
+        </div>` : ''}
       </div>` : ''}
       ${deliverText(o) ? `<div style="margin-top:12px;padding:12px;border:1.5px solid var(--good);border-radius:10px;">
         <div style="font-weight:700;color:var(--good);">📄 Lista para entregar al cliente</div>
@@ -3195,6 +3203,12 @@
         closeOrderModal();
       };
     });
+    const privBtn = document.getElementById('gabPrivNoEncBtn');
+    if(privBtn) privBtn.onclick = async ()=>{
+      /* No se agrega al historial de la orden para que nadie más lo vea. */
+      await patchDoc('orders', o.id, {gabPrivNoEncuentro: !o.gabPrivNoEncuentro});
+      closeOrderModal();
+    };
     document.querySelectorAll('[data-progress]').forEach(btn=>{
       btn.onclick = ()=> openProgressForm(o, progressAreas(o).find(a=>a.key===btn.dataset.progress));
     });
