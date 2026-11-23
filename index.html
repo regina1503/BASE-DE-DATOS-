@@ -2705,13 +2705,20 @@
      se ve igual que siempre. */
   function viewerIsGabineteOwner(){ return sameName(currentPersonName(), GABINETE_OWNER); }
   function gabPct(o){ const pr = progressOf(o,'gab'); return pr ? (Number(pr.pct)||0) : 0; }
+  /* "Faltan datos" cuenta si se apretó el botón 📝 Faltan datos o si la
+     nota del avance de Gabinete dice "falta…" (ej. "Faltan datos en humedad"). */
+  function gabFaltanDatos(o){
+    if(o.gabFlag==='faltanDatos') return true;
+    const pr = progressOf(o,'gab');
+    return !!(pr && /falta/i.test(pr.note||''));
+  }
   function gabineteRowsForOwner(items, showStageTag){
     const noEnc  = items.filter(o=> o.gabPrivNoEncuentro);
     const rest0  = items.filter(o=> !o.gabPrivNoEncuentro);
-    const faltan = rest0.filter(o=> o.gabFlag==='faltanDatos');
-    const avance = rest0.filter(o=> o.gabFlag!=='faltanDatos' && gabPct(o)>0)
+    const faltan = rest0.filter(o=> gabFaltanDatos(o));
+    const avance = rest0.filter(o=> !gabFaltanDatos(o) && gabPct(o)>0)
       .sort((a,b)=> gabPct(b)-gabPct(a));
-    const resto  = rest0.filter(o=> o.gabFlag!=='faltanDatos' && !(gabPct(o)>0));
+    const resto  = rest0.filter(o=> !gabFaltanDatos(o) && !(gabPct(o)>0));
     const head = (txt,n,color)=> `<div class="client-group-head gab-subgroup-head" style="padding:10px 18px 4px;font-size:12.5px;font-weight:800;color:${color};text-transform:uppercase;letter-spacing:.04em;border-top:1px solid var(--border);">${txt} · ${n}</div>`;
     let html = '';
     if(noEnc.length)  html += head('🔒 No la encuentro (solo tú lo ves)', noEnc.length, 'var(--warn)') + noEnc.map(o=>orderRowHtml(o, showStageTag, false)).join('');
